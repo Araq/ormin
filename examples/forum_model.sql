@@ -14,7 +14,7 @@ create table if not exists person(
   password varchar(32) not null,
   email varchar(30) not null,
   creation timestamp not null default (DATETIME('now')),
-  salt varbin(128) not null,
+  salt varchar(128) not null,
   status varchar(30) not null,
   lastOnline timestamp not null default (DATETIME('now')),
   ban varchar(128) not null default ''

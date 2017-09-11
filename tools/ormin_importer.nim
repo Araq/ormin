@@ -6,6 +6,18 @@ import parsesql, streams, strutils, os, parseopt, tables, db_common
 
 #import compiler / [ast, renderer]
 
+const
+  FileHeader = """
+type
+  Attr = object
+    name: string
+    tabIndex: int
+    typ: DbTypekind
+    key: int   # 0 nothing special,
+                # +1 -- primary key
+                # -N -- references attribute N
+"""
+
 proc writeHelp() =
   echo """
 ormin <schema.sql> --out:<file.nim>  --db:postgre|sqlite|mysql
@@ -134,6 +146,7 @@ proc generateCode(infile, outfile: string; target: Target) =
   collectTables(sql, knownTables)
   var f: File
   if open(f, outfile, fmWrite):
+    f.write FileHeader
     f.write "const tableNames = ["
     var i = 0
     for k in keys(knownTables):

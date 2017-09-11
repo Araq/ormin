@@ -3,7 +3,22 @@ import "../ormin"
 
 importModel(DbBackend.sqlite, "examples", "forum_model")
 
-query:
+let db = open("stuff", "", "", "")
+
+const
+  id = 90
+  ip = "moo"
+  answer = "dunno"
+  pw = "mypw"
+  email = "some@body.com"
+  salt = "pepper"
+  name = "me"
+
+let thisThread = tryQuery:
+  select thread(id)
+  where id == ?id
+
+createIter allThreadIds:
   select thread(id)
   where id == ?id
 
@@ -14,12 +29,12 @@ query:
 query:
   insert antibot(?ip, ?answer)
 
-query:
+let something = query:
   select antibot(answer)
   where ip == ?ip
 
 query:
-  insert person(?name, ?password, ?email, ?salt, status = r"'EmailUnconfirmed'",
+  insert person(?name, password = ?pw, ?email, ?salt, status = r"'EmailUnconfirmed'",
          lastOnline = r"DATETIME('now')")
 
 query:
@@ -30,11 +45,11 @@ query:
   update session(lastModified = r"DATETIME('now')")
   where ip == ?ip and password == ?pw
 
-query:
+let userId1 = query:
   select session(userId)
   where ip == ?ip and password == ?pw
 
-query:
+let (name9, email9, status, ban) = query:
   select person(name, email, status, ban)
   where id == ?id
 
@@ -47,14 +62,10 @@ query:
   where id == ?id
 
 query:
-  select post(author)
-  where id == ?id
-
-query:
   delete thread
   where id notin (select post(thread))
 
-query:
+let (author, creation) = query:
   select post(author)
   join person(creation)
 

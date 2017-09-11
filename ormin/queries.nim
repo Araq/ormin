@@ -27,7 +27,8 @@ const
     Function(name: "max", arity: 1, typ: dbUnknown),
     Function(name: "avg", arity: 1, typ: dbFloat),
     Function(name: "sum", arity: 1, typ: dbUnknown),
-    Function(name: "isnull", arity: 3, typ: dbUnknown)
+    Function(name: "isnull", arity: 3, typ: dbUnknown),
+    Function(name: "concat", arity: -1, typ: dbVarchar)
   ]
 
 type
@@ -275,22 +276,26 @@ proc generateIter(name, params, retType: NimNode; q: string): NimNode =
   )
   var finalParams = newNimNode(nnkFormalParams)
   finalParams.add retType
-  finalParams.add newIdentDefs(ident"db", ident("DbHandle"))
+  finalParams.add newIdentDefs(ident"db", ident("DbConn"))
+  var i = 1
   for p in params:
     finalParams.add p
-    body.add newCall("bindParam", ident"db", prepStmt, p[0])
+    body.add newCall("bindParam", ident"db", prepStmt, newLit(i), p[0])
+    inc i
   body.add newCall("startQuery", ident"db", prepStmt)
-  let yld = newStmtList(newCall("stepQuery", ident"db", prepStmt))
+  let yld = newStmtList()
   if retType.len > 1:
     var i = 0
     for r in retType:
-      yld.add newCall("bindResult", ident"db", prepStmt, ident"res", newLit(i))
+      template resAt(res, i) = res[i]
+      yld.add newCall("bindResult", ident"db", prepStmt, newLit(i),
+                      getAst(resAt(ident"res", i)))
       inc i
   else:
-    yld.add newCall("bindWholeResult", ident"db", prepStmt, ident"res")
+    yld.add newCall("bindResult", ident"db", prepStmt, newLit(0), ident"res")
   yld.add newTree(nnkYieldStmt, ident"res")
 
-  let whileStmt = newTree(nnkWhileStmt, bindSym"true", yld)
+  let whileStmt = newTree(nnkWhileStmt, newCall("stepQuery", ident"db", prepStmt), yld)
   body.add whileStmt
   body.add newCall("stopQuery", ident"db", prepStmt)
 
@@ -303,13 +308,12 @@ proc generateIter(name, params, retType: NimNode; q: string): NimNode =
     newEmptyNode(),
     body)
   result = newStmtList(prepare, iter)
-  when defined(debugOrminDsl):
-    echo repr result
 
 type
   QueryKind = enum
     qkNone,
     qkSelect,
+    qkJoin,
     qkInsert,
     qkReplace,
     qkUpdate,
@@ -319,12 +323,13 @@ type
     env: seq[int]
     kind: QueryKind
     params, retType: NimNode
+    coln: int
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "",
     env: @[], kind: qkNone, params: newNimNode(nnkFormalParams),
-    retType: newNimNode(nnkPar))
+    retType: newNimNode(nnkPar), coln: 0)
 
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
@@ -336,13 +341,12 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
       return
     if q.kind == qkSelect:
       escIdent(q.fromm, tab)
-    else:
+    elif q.kind != qkJoin:
       escIdent(q.head, tab)
     if q.kind == qkUpdate: q.head.add " set "
-    elif q.kind != qkSelect: q.head.add "("
+    elif q.kind notin {qkSelect, qkJoin}: q.head.add "("
 
     q.env.add tabindex
-    var coln = 0
     for i in 1..<call.len:
       let col = call[i]
       if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkUpdate, qkInsert}:
@@ -351,10 +355,10 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
         if coltype.kind == dbUnknown:
           error "unkown column name: " & colname, col
         else:
-          if coln > 0: q.head.add ", "
+          if q.coln > 0: q.head.add ", "
           escIdent(q.head, colname)
-          q.params.add newIdentDefs(col[1], toNimType(coltype))
-          inc coln
+          #q.params.add newIdentDefs(col[1], toNimType(coltype))
+          inc q.coln
         if q.kind == qkInsert:
           if q.values.len > 0: q.values.add ", "
           discard cond(col[1], q.values, q.params, coltype, q.env)
@@ -368,20 +372,23 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
         if coltype.kind == dbUnknown:
           error "unkown column name: " & colname, col
         else:
-          if coln > 0: q.head.add ", "
+          if q.coln > 0: q.head.add ", "
           escIdent(q.head, colname)
-          inc coln
+          inc q.coln
           q.params.add newIdentDefs(col[1], toNimType(coltype))
         if q.kind == qkInsert:
           if q.values.len > 0: q.values.add ", "
           q.values.add "?"
         else:
           q.head.add " = ?"
-      elif q.kind == qkSelect:
-        discard cond(col, q.head, q.params, DbType(kind: dbUnknown), q.env)
+      elif q.kind in {qkSelect, qkJoin}:
+        if q.coln > 0: q.head.add ", "
+        inc q.coln
+        let t = cond(col, q.head, q.params, DbType(kind: dbUnknown), q.env)
+        q.retType.add toNimType(t)
       else:
         error "unknown selector: " & repr(n), n
-    if q.kind notin {qkUpdate, qkSelect}: q.head.add ")"
+    if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
   elif n.kind in {nnkIdent, nnkAccQuoted, nnkSym} and q.kind == qkDelete:
     let tab = $n
     let tabIndex = tableNames.find(tab)
@@ -448,7 +455,11 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         escIdent(q.join, tab)
         if not autoJoin(q.join, q.env[^1], tabIndex):
           error "cannot compute auto join from: " & tableNames[q.env[^1]] & " to: " & tab, n
-        q.env.add tabIndex
+        var oldEnv = q.env
+        q.env = @[tabIndex]
+        q.kind = qkJoin
+        tableSel(n[1], q)
+        swap q.env, oldEnv
     else:
       error "unknown query component " & repr(n), n
   of "groupby":
@@ -495,7 +506,13 @@ proc queryAsString(q: QueryBuilder): string =
       result.add "\Loffset "
       result.add q.offset
 
-macro query*(body: untyped): untyped =
+proc newGlobalVar(name, value: NimNode): NimNode =
+  result = newTree(nnkVarSection,
+    newTree(nnkIdentDefs, newTree(nnkPragmaExpr, name,
+      newTree(nnkPragma, ident"global")), newEmptyNode(), value)
+  )
+
+proc queryImpl(body: NimNode; attempt: bool): NimNode =
   expectKind body, nnkStmtList
   expectMinLen body, 1
 
@@ -504,8 +521,56 @@ macro query*(body: untyped): untyped =
     if b.kind == nnkCommand: queryh(b, q)
     else: error "illformed query", b
   let sql = queryAsString(q)
+  let prepStmt = genSym(nskVar)
+  let res = genSym(nskVar)
+  result = newTree(if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
+    newGlobalVar(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
+  )
+  var i = 1
+  for p in q.params:
+    result.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p[0])
+    inc i
+  if q.retType.len > 0:
+    result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
+  result.add newCall(bindSym"startQuery", ident"db", prepStmt)
+  var body = newStmtList()
+  if q.retType.len > 1:
+    var i = 0
+    for r in q.retType:
+      template resAt(res, i) = res[i]
+      body.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(i),
+                         getAst(resAt(res, i)))
+      inc i
+  elif q.retType.len > 0:
+    body.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(0), res)
+  else:
+    body.add newTree(nnkDiscardStmt, newEmptyNode())
 
-  result = newCall("echo", newLit(sql))
+  template ifStmt2(prepStmt, action) {.dirty.} =
+    if stepQuery(db, prepStmt):
+      action
+    else:
+      dbError(db)
+
+  template ifStmt1(prepStmt, action) {.dirty.} =
+    if stepQuery(db, prepStmt):
+      action
+
+  if attempt:
+    result.add getAst(ifStmt1(prepStmt, body))
+  else:
+    result.add getAst(ifStmt2(prepStmt, body))
+  result.add newCall(bindSym"stopQuery", ident"db", prepStmt)
+  if q.retType.len > 0:
+    result.add res
+  when defined(debugOrminDsl):
+    echo repr result
+
+macro query*(body: untyped): untyped =
+  result = queryImpl(body, false)
+
+macro tryQuery*(body: untyped): untyped =
+  result = queryImpl(body, true)
 
 macro createIter*(name, query: untyped): untyped =
   ## Creates an iterator of the given 'name' that iterates
@@ -521,3 +586,5 @@ macro createIter*(name, query: untyped): untyped =
     error "query for iterator must be a 'select'", query
   let sql = queryAsString(q)
   result = generateIter(name, q.params, q.retType, sql)
+  when defined(debugOrminDsl):
+    echo repr result

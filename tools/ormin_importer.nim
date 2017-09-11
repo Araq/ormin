@@ -14,8 +14,8 @@ type
     tabIndex: int
     typ: DbTypekind
     key: int   # 0 nothing special,
-                # +1 -- primary key
-                # -N -- references attribute N
+               # +1 -- primary key
+               # -N -- references attribute N
 """
 
 proc writeHelp() =

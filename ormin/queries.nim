@@ -9,7 +9,6 @@ import macros, strutils, db_common
 
 # SQL dialect specific things:
 const
-  placeHolder = "?"
   equals = "="
   nequals = "<>"
 
@@ -33,6 +32,35 @@ const
 
 type
   Env = seq[int]
+
+type
+  QueryKind = enum
+    qkNone,
+    qkSelect,
+    qkJoin,
+    qkInsert,
+    qkReplace,
+    qkUpdate,
+    qkDelete
+  QueryBuilder = ref object
+    head, fromm, join, values, where, groupby, having, orderby: string
+    env: seq[int]
+    kind: QueryKind
+    params, retType: NimNode
+    coln, qmark: int
+
+proc newQueryBuilder(): QueryBuilder {.compileTime.} =
+  QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
+    groupby: "", having: "", orderby: "",
+    env: @[], kind: qkNone, params: newNimNode(nnkFormalParams),
+    retType: newNimNode(nnkPar), coln: 0, qmark: 0)
+
+proc placeholder(q: QueryBuilder): string =
+  when dbBackend == DbBackend.postgre:
+    inc q.qmark
+    result = "$" & $q.qmark
+  else:
+    result = "?"
 
 proc lookup(table, attr: string; env: Env): DbType =
   var candidate = -1
@@ -86,7 +114,7 @@ proc escIdent(dest: var string; src: string) =
     dest.add("\"" & replace(src, "\"", "\"\"") & "\"")
 
 proc cond(n: NimNode; q: var string; params: NimNode;
-          expected: DbType, env: Env): DbType =
+          expected: DbType, qb: QueryBuilder): DbType =
   case n.kind
   of nnkIdent:
     let name = $n
@@ -95,7 +123,7 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       result = DbType(kind: dbUnknown)
     else:
       escIdent(q, name)
-      result = lookup("", name, env)
+      result = lookup("", name, qb.env)
       if result.kind == dbUnknown:
         error "unknown column name: " & name, n
   of nnkDotExpr:
@@ -104,20 +132,20 @@ proc cond(n: NimNode; q: var string; params: NimNode;
     escIdent(q, t)
     q.add '.'
     escIdent(q, a)
-    result = lookup(t, a, env)
+    result = lookup(t, a, qb.env)
   of nnkPar:
     if n.len == 1:
       q.add "("
-      result = cond(n[0], q, params, expected, env)
+      result = cond(n[0], q, params, expected, qb)
       q.add ")"
     else:
       error "tuple construction not allowed here", n
   of nnkCurly:
     q.add "("
-    let a = cond(n[0], q, params, DbType(kind: dbUnknown), env)
+    let a = cond(n[0], q, params, DbType(kind: dbUnknown), qb)
     for i in 1..<n.len:
       q.add ", "
-      let b = cond(n[i], q, params, a, env)
+      let b = cond(n[i], q, params, a, qb)
       checkCompatible(a, b, n[i])
     q.add ")"
     result = DbType(kind: dbSet)
@@ -144,54 +172,54 @@ proc cond(n: NimNode; q: var string; params: NimNode;
     case op
     of "and", "or":
       result = DbType(kind: dbBool)
-      let a = cond(n[1], q, params, result, env)
+      let a = cond(n[1], q, params, result, qb)
       checkBool a, n[1]
       q.add ' '
       q.add op
       q.add ' '
-      let b = cond(n[2], q, params, result, env)
+      let b = cond(n[2], q, params, result, qb)
       checkBool b, n[2]
     of "<=", "<", ">=", ">", "==", "!=":
-      let a = cond(n[1], q, params, DbType(kind: dbUnknown), env)
+      let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
       q.add ' '
       if op == "==": q.add equals
       elif op == "!=": q.add nequals
       else: q.add op
       q.add ' '
-      let b = cond(n[2], q, params, a, env)
+      let b = cond(n[2], q, params, a, qb)
       checkCompatible a, b, n
       result = DbType(kind: dbBool)
     of "in", "notin":
-      let a = cond(n[1], q, params, DbType(kind: dbUnknown), env)
+      let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
       if n[2].kind == nnkInfix and $n[2][0] == "..":
         if op == "in": q.add " between "
         else: q.add " not between "
         let r = n[2]
-        let b = cond(r[1], q, params, a, env)
+        let b = cond(r[1], q, params, a, qb)
         checkCompatible a, b, n
         q.add " and "
-        let c = cond(r[2], q, params, a, env)
+        let c = cond(r[2], q, params, a, qb)
         checkCompatible a, c, n
       else:
         if op == "in": q.add " in "
         else: q.add " not in "
-        let b = cond(n[2], q, params, DbType(kind: dbUnknown), env)
+        let b = cond(n[2], q, params, DbType(kind: dbUnknown), qb)
         checkCompatibleSet a, b, n
       result = DbType(kind: dbBool)
     else:
       # treat as arithmetic operator:
-      result = cond(n[1], q, params, DbType(kind: dbUnknown), env)
+      result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
       q.add ' '
       q.add op
       q.add ' '
-      let b = cond(n[2], q, params, result, env)
+      let b = cond(n[2], q, params, result, qb)
       checkCompatible result, b, n
 
   of nnkPrefix:
     let op = $n[0]
     case op
     of "?":
-      q.add placeHolder
+      q.add placeHolder(qb)
       result = expected
       if result.kind == dbUnknown:
         error "cannot infer the type of the placeholder", n
@@ -200,14 +228,14 @@ proc cond(n: NimNode; q: var string; params: NimNode;
     of "not":
       result = DbType(kind: dbBool)
       q.add "not "
-      let a = cond(n[1], q, params, result, env)
+      let a = cond(n[1], q, params, result, qb)
       checkBool a, n[1]
     else:
       # treat as arithmetic operator:
       q.add ' '
       q.add op
       q.add ' '
-      result = cond(n[1], q, params, DbType(kind: dbUnknown), env)
+      result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
   of nnkCall:
     let op = $n[0]
     for f in functions:
@@ -216,7 +244,7 @@ proc cond(n: NimNode; q: var string; params: NimNode;
           q.add op
           q.add "("
           for i in 1..<n.len:
-            result = cond(n[i], q, params, DbType(kind: dbUnknown), env)
+            result = cond(n[i], q, params, DbType(kind: dbUnknown), qb)
           if f.typ != dbUnknown: result.kind = f.typ
           q.add ")"
           return
@@ -232,19 +260,21 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       if tabIndex < 0:
         error "unknown table name: " & tab, n[1][0]
       else:
-        let subenv: seq[int] = @[tabIndex]
+        var subenv: seq[int] = @[tabIndex]
+        swap(qb.env, subenv)
         var subselect = "select "
         for i in 1..<call.len:
           if i > 1: subselect.add ", "
-          discard cond(call[i], subselect, params, DbType(kind: dbUnknown), subenv)
+          discard cond(call[i], subselect, params, DbType(kind: dbUnknown), qb)
         subselect.add " from "
         escIdent(subselect, tab)
         q.add subselect
+        swap(qb.env, subenv)
     elif n.len == 2 and $n[0] == "select" and n[1].kind == nnkCommand:
       result = DbType(kind: dbSet)
       let cmd = n[1]
       var subselect = "select "
-      var subenv: seq[int] = @[]
+      var subenv: seq[int] = qb.env
       if cmd.len >= 1 and cmd[0].kind == nnkCall:
         let call = cmd[0]
         let tab = $call[0]
@@ -252,15 +282,16 @@ proc cond(n: NimNode; q: var string; params: NimNode;
         if tabIndex < 0:
           error "unknown table name: " & tab, n[1][0]
         else:
-          subenv.add tabindex
+          qb.env = @[tabindex]
           for i in 1..<call.len:
             if i > 1: subselect.add ", "
-            discard cond(call[i], subselect, params, DbType(kind: dbUnknown), subenv)
+            discard cond(call[i], subselect, params, DbType(kind: dbUnknown), qb)
           subselect.add " from "
           escIdent(subselect, tab)
       if cmd.len >= 2 and cmd[1].kind in nnkCallKinds and $cmd[1][0] == "where":
         subselect.add " where "
-        discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), subenv)
+        discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
+      qb.env = subenv
       q.add subselect
     else:
       error "construct not supported in condition: " & treeRepr n, n
@@ -309,28 +340,6 @@ proc generateIter(name, params, retType: NimNode; q: string): NimNode =
     body)
   result = newStmtList(prepare, iter)
 
-type
-  QueryKind = enum
-    qkNone,
-    qkSelect,
-    qkJoin,
-    qkInsert,
-    qkReplace,
-    qkUpdate,
-    qkDelete
-  QueryBuilder = ref object
-    head, fromm, join, values, where, groupby, having, orderby: string
-    env: seq[int]
-    kind: QueryKind
-    params, retType: NimNode
-    coln: int
-
-proc newQueryBuilder(): QueryBuilder {.compileTime.} =
-  QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
-    groupby: "", having: "", orderby: "",
-    env: @[], kind: qkNone, params: newNimNode(nnkFormalParams),
-    retType: newNimNode(nnkPar), coln: 0)
-
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
     let call = n
@@ -361,10 +370,10 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           inc q.coln
         if q.kind == qkInsert:
           if q.values.len > 0: q.values.add ", "
-          discard cond(col[1], q.values, q.params, coltype, q.env)
+          discard cond(col[1], q.values, q.params, coltype, q)
         else:
           q.head.add " = "
-          discard cond(col[1], q.head, q.params, coltype, q.env)
+          discard cond(col[1], q.head, q.params, coltype, q)
 
       elif col.kind == nnkPrefix and $col[0] == "?":
         let colname = $col[1]
@@ -378,13 +387,14 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           q.params.add newIdentDefs(col[1], toNimType(coltype))
         if q.kind == qkInsert:
           if q.values.len > 0: q.values.add ", "
-          q.values.add "?"
+          q.values.add placeholder(q)
         else:
-          q.head.add " = ?"
+          q.head.add " = "
+          q.head.add placeholder(q)
       elif q.kind in {qkSelect, qkJoin}:
         if q.coln > 0: q.head.add ", "
         inc q.coln
-        let t = cond(col, q.head, q.params, DbType(kind: dbUnknown), q.env)
+        let t = cond(col, q.head, q.params, DbType(kind: dbUnknown), q)
         q.retType.add toNimType(t)
       else:
         error "unknown selector: " & repr(n), n
@@ -434,7 +444,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     tableSel(n[1], q)
   of "where":
     expectLen n, 2
-    let t = cond(n[1], q.where, q.params, DbType(kind: dbBool), q.env)
+    let t = cond(n[1], q.where, q.params, DbType(kind: dbBool), q)
     checkBool(t, n)
   of "join", "innerjoin", "outerjoin":
     if kind == "outerjoin": q.join.add "\Louter join "
@@ -443,7 +453,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     if n[1].kind == nnkCommand and $n[1][0] == "on":
       q.join.add " on "
       expectLen n[1], 2
-      let t = cond(n[1][1], q.join, q.params, DbType(kind: dbBool), q.env)
+      let t = cond(n[1][1], q.join, q.params, DbType(kind: dbBool), q)
       checkBool(t, n[1])
     elif n[1].kind == nnkCall:
       # auto join:
@@ -464,13 +474,13 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       error "unknown query component " & repr(n), n
   of "groupby":
     for i in 1..<n.len:
-      discard cond(n[i], q.groupby, q.params, DbType(kind: dbUnknown), q.env)
+      discard cond(n[i], q.groupby, q.params, DbType(kind: dbUnknown), q)
   of "orderby":
     for i in 1..<n.len:
-      discard cond(n[i], q.orderby, q.params, DbType(kind: dbUnknown), q.env)
+      discard cond(n[i], q.orderby, q.params, DbType(kind: dbUnknown), q)
   of "having":
     expectLen n, 2
-    let t = cond(n[1], q.having, q.params, DbType(kind: dbBool), q.env)
+    let t = cond(n[1], q.having, q.params, DbType(kind: dbBool), q)
     checkBool(t, n[1])
   else:
     error "unknown query component " & repr(n), n

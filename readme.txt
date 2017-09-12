@@ -2,8 +2,7 @@
      ormin
 ================
 
-Prepared SQL statement generator for Nim. A lightweight
-ORM.
+Prepared SQL statement generator for Nim. A lightweight ORM.
 
 Features:
 
@@ -15,6 +14,16 @@ Features:
   no SQL injections possible.
 - Generated prepared statements: As fast as low level
   hand written API calls!
+
+Todo:
+
+- Add support for UNION, INTERSECT and EXCEPT.
+- First class JSON support: No explicit conversions
+  from rows to JSON objects required.
+- Generate 'table.column' for disambiguation.
+- Fix explicit joins.
+- Write postgre backend.
+- Write mysql backend.
 
 
 Copyright (c) 2017 Andreas Rumpf.

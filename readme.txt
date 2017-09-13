@@ -18,6 +18,8 @@ Features:
 Todo:
 
 - Add support for UNION, INTERSECT and EXCEPT.
+- Add support 'ORDER BY ASC/DESC'.
+- Add support for LIMIT and OFFSET.
 - First class JSON support: No explicit conversions
   from rows to JSON objects required.
 - Generate 'table.column' for disambiguation.

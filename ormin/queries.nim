@@ -300,7 +300,7 @@ proc cond(n: NimNode; q: var string; params: NimNode;
 
 proc generateIter(name, params, retType: NimNode; q: string): NimNode =
   let prepStmt = ident($name & "PrepStmt")
-  let prepare = newVarStmt(prepStmt, newCall("prepareStmt", ident"db", newLit(q)))
+  let prepare = newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit(q)))
 
   let body = newStmtList(
     newTree(nnkVarSection, newIdentDefs(ident"res", retType))
@@ -309,26 +309,28 @@ proc generateIter(name, params, retType: NimNode; q: string): NimNode =
   finalParams.add retType
   finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
-  for p in params:
-    finalParams.add p
-    body.add newCall("bindParam", ident"db", prepStmt, newLit(i), p[0])
-    inc i
-  body.add newCall("startQuery", ident"db", prepStmt)
+  if params.len > 0:
+    body.add newCall(bindSym"startBindings", newLit(params.len))
+    for p in params:
+      finalParams.add p
+      body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p[0])
+      inc i
+  body.add newCall(bindSym"startQuery", ident"db", prepStmt)
   let yld = newStmtList()
   if retType.len > 1:
     var i = 0
     for r in retType:
       template resAt(res, i) = res[i]
-      yld.add newCall("bindResult", ident"db", prepStmt, newLit(i),
+      yld.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(i),
                       getAst(resAt(ident"res", i)))
       inc i
   else:
-    yld.add newCall("bindResult", ident"db", prepStmt, newLit(0), ident"res")
+    yld.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(0), ident"res")
   yld.add newTree(nnkYieldStmt, ident"res")
 
-  let whileStmt = newTree(nnkWhileStmt, newCall("stepQuery", ident"db", prepStmt), yld)
+  let whileStmt = newTree(nnkWhileStmt, newCall(bindSym"stepQuery", ident"db", prepStmt), yld)
   body.add whileStmt
-  body.add newCall("stopQuery", ident"db", prepStmt)
+  body.add newCall(bindSym"stopQuery", ident"db", prepStmt)
 
   let iter = newTree(nnkIteratorDef,
     name,
@@ -536,13 +538,16 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
   result = newTree(if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
     newGlobalVar(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
-  var i = 1
-  for p in q.params:
-    result.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p[0])
-    inc i
   if q.retType.len > 0:
     result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
-  result.add newCall(bindSym"startQuery", ident"db", prepStmt)
+  let blk = newStmtList()
+  var i = 1
+  if q.params.len > 0:
+    blk.add newCall(bindSym"startBindings", newLit(q.params.len))
+    for p in q.params:
+      blk.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p[0])
+      inc i
+  blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
   var body = newStmtList()
   if q.retType.len > 1:
     var i = 0
@@ -567,10 +572,11 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
       action
 
   if attempt:
-    result.add getAst(ifStmt1(prepStmt, body))
+    blk.add getAst(ifStmt1(prepStmt, body))
   else:
-    result.add getAst(ifStmt2(prepStmt, body))
-  result.add newCall(bindSym"stopQuery", ident"db", prepStmt)
+    blk.add getAst(ifStmt2(prepStmt, body))
+  blk.add newCall(bindSym"stopQuery", ident"db", prepStmt)
+  result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
   if q.retType.len > 0:
     result.add res
   when defined(debugOrminDsl):

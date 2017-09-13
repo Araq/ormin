@@ -60,6 +60,8 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
   if prepare_v2(db, q, q.len.cint, result, nil) != SQLITE_OK:
     dbError(db)
 
+template startBindings*(n: int) {.dirty.} = discard "nothing to do"
+
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: int) =
   if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
     dbError(db)

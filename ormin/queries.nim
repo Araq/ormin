@@ -34,8 +34,7 @@ const
 
 type
   Env = seq[(int, string)]
-
-type
+  Params = seq[tuple[ex, typ: NimNode; isJson: bool]]
   QueryKind = enum
     qkNone,
     qkSelect,
@@ -49,14 +48,19 @@ type
     limit, offset: string
     env: Env
     kind: QueryKind
-    params, retType: NimNode
+    retType: NimNode
+    retTypeIsJson: bool
+    retNames: seq[string]
+    params: Params
     coln, qmark, aliasGen: int
+    colAliases: seq[(string, DbType)]
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "", limit: "", offset: "",
-    env: @[], kind: qkNone, params: newNimNode(nnkFormalParams),
-    retType: newNimNode(nnkPar), coln: 0, qmark: 0, aliasGen: 1)
+    env: @[], kind: qkNone, params: @[],
+    retType: newNimNode(nnkPar), retTypeIsJson: false, retNames: @[],
+    coln: 0, qmark: 0, aliasGen: 1, colAliases: @[])
 
 proc getAlias(q: QueryBuilder; tabIndex: int): string =
   result = tableNames[tabIndex][0] & $q.aliasGen
@@ -140,7 +144,7 @@ proc escIdent(dest: var string; src: string) =
   else:
     dest.add("\"" & replace(src, "\"", "\"\"") & "\"")
 
-proc cond(n: NimNode; q: var string; params: NimNode;
+proc cond(n: NimNode; q: var string; params: var Params;
           expected: DbType, qb: QueryBuilder): DbType =
   case n.kind
   of nnkIdent:
@@ -149,14 +153,19 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       q.add "*"
       result = DbType(kind: dbUnknown)
     else:
-      var alias: string
-      result = lookup("", name, qb.env, alias)
-      if result.kind == dbUnknown:
-        error "unknown column name: " & name, n
-      elif qb.kind in {qkSelect, qkJoin}:
-        doAssert alias.len >= 0
-        q.add alias
-        q.add '.'
+      block checkAliases:
+        for a in qb.colAliases:
+          if cmpIgnoreCase(a[0], name) == 0:
+            result = a[1]
+            break checkAliases
+        var alias: string
+        result = lookup("", name, qb.env, alias)
+        if result.kind == dbUnknown:
+          error "unknown column name: " & name, n
+        elif qb.kind in {qkSelect, qkJoin}:
+          doAssert alias.len >= 0
+          q.add alias
+          q.add '.'
       escIdent(q, name)
   of nnkDotExpr:
     let t = $n[0]
@@ -233,6 +242,15 @@ proc cond(n: NimNode; q: var string; params: NimNode;
         let b = cond(n[2], q, params, DbType(kind: dbUnknown), qb)
         checkCompatibleSet a, b, n
       result = DbType(kind: dbBool)
+    of "as":
+      result = cond(n[1], q, params, expected, qb)
+      q.add " as "
+      expectKind n[2], nnkIdent
+      let alias = $n[2]
+      escIdent(q, alias)
+      qb.colAliases.add((alias, result))
+      if expected.kind != dbUnknown:
+        checkCompatible result, expected, n
     else:
       # treat as arithmetic operator:
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
@@ -245,13 +263,13 @@ proc cond(n: NimNode; q: var string; params: NimNode;
   of nnkPrefix:
     let op = $n[0]
     case op
-    of "?":
+    of "?", "%":
       q.add placeHolder(qb)
       result = expected
       if result.kind == dbUnknown:
         error "cannot infer the type of the placeholder", n
       else:
-        params.add newIdentDefs(n[1], toNimType(result))
+        params.add((ex: n[1], typ: toNimType(result), isJson: op == "%"))
     of "not":
       result = DbType(kind: dbBool)
       q.add "not "
@@ -336,28 +354,32 @@ proc cond(n: NimNode; q: var string; params: NimNode;
   else:
     error "construct not supported in condition: " & treeRepr n, n
 
-proc generateIter(name, params, retType: NimNode; q: string): NimNode =
+proc generateIter(name: NimNode, q: QueryBuilder; sql: string): NimNode =
   let prepStmt = ident($name & "PrepStmt")
-  let prepare = newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit(q)))
+  let prepare = newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit(sql)))
 
   let body = newStmtList(
-    newTree(nnkVarSection, newIdentDefs(ident"res", retType))
+    newTree(nnkVarSection, newIdentDefs(ident"res", q.retType))
   )
   var finalParams = newNimNode(nnkFormalParams)
-  finalParams.add retType
+  finalParams.add q.retType
   finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
-  if params.len > 0:
-    body.add newCall(bindSym"startBindings", newLit(params.len))
-    for p in params:
-      finalParams.add p
-      body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p[0])
+  if q.params.len > 0:
+    body.add newCall(bindSym"startBindings", newLit(q.params.len))
+    for p in q.params:
+      if p.isJson:
+        finalParams.add newIdentDefs(p.ex, ident"JsonNode")
+        body.add newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(i), p.ex, p.typ)
+      else:
+        finalParams.add newIdentDefs(p.ex, p.typ)
+        body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex)
       inc i
   body.add newCall(bindSym"startQuery", ident"db", prepStmt)
   let yld = newStmtList()
-  if retType.len > 1:
+  if q.retType.len > 1:
     var i = 0
-    for r in retType:
+    for r in q.retType:
       template resAt(res, i) = res[i]
       yld.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(i),
                       getAst(resAt(ident"res", i)))
@@ -379,6 +401,18 @@ proc generateIter(name, params, retType: NimNode; q: string): NimNode =
     newEmptyNode(),
     body)
   result = newStmtList(prepare, iter)
+
+proc getColumnName(n: NimNode): string =
+  case n.kind
+  of nnkPar:
+    if n.len == 1: result = getColumnName(n[0])
+  of nnkInfix:
+    if $n[0] == "as": result = getColumnName(n[2])
+  of nnkIdent, nnkSym:
+    result = $n
+  else: discard
+  if result.len == 0:
+    error "cannot extract column name of: " & repr(n), n
 
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
@@ -417,7 +451,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           q.head.add " = "
           discard cond(col[1], q.head, q.params, coltype, q)
 
-      elif col.kind == nnkPrefix and $col[0] == "?":
+      elif col.kind == nnkPrefix and (let op = $col[0]; op == "?" or op == "%"):
         let colname = $col[1]
         let coltype = lookup("", colname, q.env)
         if coltype.kind == dbUnknown:
@@ -426,7 +460,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           if q.coln > 0: q.head.add ", "
           escIdent(q.head, colname)
           inc q.coln
-          q.params.add newIdentDefs(col[1], toNimType(coltype))
+          q.params.add((ex: col[1], typ: toNimType(coltype), isJson: op == "%"))
         if q.kind == qkInsert:
           if q.values.len > 0: q.values.add ", "
           q.values.add placeholder(q)
@@ -438,6 +472,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
         inc q.coln
         let t = cond(col, q.head, q.params, DbType(kind: dbUnknown), q)
         q.retType.add toNimType(t)
+        q.retNames.add getColumnName(col)
       else:
         error "unknown selector: " & repr(n), n
     if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
@@ -612,7 +647,10 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
   if q.params.len > 0:
     blk.add newCall(bindSym"startBindings", newLit(q.params.len))
     for p in q.params:
-      blk.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p[0])
+      if p.isJson:
+        blk.add newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(i), p.ex, p.typ)
+      else:
+        blk.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex)
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
   var body = newStmtList()
@@ -668,6 +706,6 @@ macro createIter*(name, query: untyped): untyped =
   if q.kind != qkSelect:
     error "query for iterator must be a 'select'", query
   let sql = queryAsString(q)
-  result = generateIter(name, q.params, q.retType, sql)
+  result = generateIter(name, q, sql)
   when defined(debugOrminDsl):
     echo repr result

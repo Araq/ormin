@@ -1,7 +1,7 @@
 
 {.deadCodeElim: on.}
 
-import strutils, sqlite3
+import strutils, sqlite3, json
 
 import db_common
 export db_common
@@ -77,6 +77,27 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x: string) =
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: float64) =
   if bind_double(s, idx.cint, x) != SQLITE_OK:
     dbError(db)
+
+template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
+                        t: typedesc) =
+  let x = xx
+  if x.kind == JNull:
+    if bind_null(s, idx.cint) != SQLITE_OK: dbError(db)
+  else:
+    when t is string:
+      doAssert x.kind == JString
+      let xs = x.str
+      bindParam(db, s, idx, xs)
+    elif (t is int) or (t is int64):
+      doAssert x.kind == JInt
+      let xi = x.num
+      bindParam(db, s, idx, xi)
+    elif t is float64:
+      doAssert x.kind == JFloat
+      let xf = x.fnum
+      bindParam(db, s, idx, xf)
+    else:
+      {.error: "invalid type for JSON object".}
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int) =
   dest = int column_int64(s, idx.cint)

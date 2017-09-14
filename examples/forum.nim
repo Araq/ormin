@@ -1,5 +1,5 @@
 
-import "../ormin"
+import "../ormin", json
 
 importModel(DbBackend.sqlite, "examples", "forum_model")
 
@@ -47,9 +47,11 @@ query:
   update session(lastModified = !!"DATETIME('now')")
   where ip == ?ip and password == ?pw
 
+let myj = %*{"pw": "stuff here"}
+
 let userId1 = query:
   select session(userId)
-  where ip == ?ip and password == ?pw
+  where ip == ?ip and password == %myj["pw"]
 
 let (name9, email9, status, ban) = query:
   select person(name, email, status, ban)
@@ -75,6 +77,9 @@ let (authorB, creationB) = query:
   select post(author)
   join person(creation) on author == id
 
+let allPosts = query:
+  select post(count(_) as cnt)
+  where cnt > 0
 
 #query:
 #  update thread(modified = (select post(creation) where post.thread == ?thread

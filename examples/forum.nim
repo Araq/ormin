@@ -32,6 +32,8 @@ query:
 let something = query:
   select antibot(answer)
   where ip == ?ip
+  orderby desc(ip)
+  limit 1
 
 query:
   insert person(?name, password = ?pw, ?email, ?salt, status = r"'EmailUnconfirmed'",

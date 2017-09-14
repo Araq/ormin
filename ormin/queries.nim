@@ -27,7 +27,9 @@ const
     Function(name: "avg", arity: 1, typ: dbFloat),
     Function(name: "sum", arity: 1, typ: dbUnknown),
     Function(name: "isnull", arity: 3, typ: dbUnknown),
-    Function(name: "concat", arity: -1, typ: dbVarchar)
+    Function(name: "concat", arity: -1, typ: dbVarchar),
+    Function(name: "asc", arity: 1, typ: dbUnknown),
+    Function(name: "desc", arity: 1, typ: dbUnknown)
   ]
 
 type
@@ -44,6 +46,7 @@ type
     qkDelete
   QueryBuilder = ref object
     head, fromm, join, values, where, groupby, having, orderby: string
+    limit, offset: string
     env: Env
     kind: QueryKind
     params, retType: NimNode
@@ -51,7 +54,7 @@ type
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
-    groupby: "", having: "", orderby: "",
+    groupby: "", having: "", orderby: "", limit: "", offset: "",
     env: @[], kind: qkNone, params: newNimNode(nnkFormalParams),
     retType: newNimNode(nnkPar), coln: 0, qmark: 0, aliasGen: 1)
 
@@ -115,6 +118,10 @@ proc `$`(a: DbType): string = $a.kind
 proc checkBool(a: DbType; n: NimNode) =
   if a.kind != dbBool:
     error "expected type 'bool', but got: " & $a, n
+
+proc checkInt(a: DbType; n: NimNode) =
+  if a.kind != dbInt:
+    error "expected type 'int', but got: " & $a, n
 
 proc checkCompatible(a, b: DbType; n: NimNode) =
   if a.kind != b.kind:
@@ -533,6 +540,14 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     expectLen n, 2
     let t = cond(n[1], q.having, q.params, DbType(kind: dbBool), q)
     checkBool(t, n[1])
+  of "limit":
+    expectLen n, 2
+    let t = cond(n[1], q.limit, q.params, DbType(kind: dbInt), q)
+    checkInt(t, n[1])
+  of "offset":
+    expectLen n, 2
+    let t = cond(n[1], q.offset, q.params, DbType(kind: dbInt), q)
+    checkInt(t, n[1])
   else:
     error "unknown query component " & repr(n), n
 
@@ -559,13 +574,14 @@ proc queryAsString(q: QueryBuilder): string =
   if q.orderby.len > 0:
     result.add "\Lorder by "
     result.add q.orderby
-  when false:
-    if q.limit.len > 0:
-      result.add "\Llimit "
-      result.add q.limit
-    if q.offset.len > 0:
-      result.add "\Loffset "
-      result.add q.offset
+  if q.limit.len > 0:
+    result.add "\Llimit "
+    result.add q.limit
+  if q.offset.len > 0:
+    result.add "\Loffset "
+    result.add q.offset
+  when defined(debugOrminSql):
+    echo "\n", result
 
 proc newGlobalVar(name, value: NimNode): NimNode =
   result = newTree(nnkVarSection,

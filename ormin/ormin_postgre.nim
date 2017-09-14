@@ -1,5 +1,5 @@
 
-import strutils, postgres
+import strutils, postgres, json
 
 import db_common
 export db_common
@@ -36,15 +36,44 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
   if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 
 template startBindings*(n: int) {.dirty.} =
+  # pparams is a duplicated array to keep the Nim string alive
+  # for the duration of the query. This is safer than relying
+  # on the conservative stack marking:
   var pparams: array[n, string]
+  var parr: array[n, cstring]
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: typedesc) =
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
   pparams[idx-1] = $x
+  parr[idx-1] = cstring(pparams[idx-1])
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int; t: typedesc) =
+template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
+                        t: typedesc) =
+  let x = xx
+  if x.kind == JNull:
+    # a NULL entry is not reflected in the 'pparams' array:
+    parr[idx-1] = cstring(nil)
+  else:
+    when t is string:
+      doAssert x.kind == JString
+      let xs = x.str
+      bindParam(db, s, idx, xs, t)
+    elif (t is int) or (t is int64):
+      doAssert x.kind == JInt
+      let xi = x.num
+      bindParam(db, s, idx, xi, t)
+    elif t is float64:
+      doAssert x.kind == JFloat
+      let xf = x.fnum
+      bindParam(db, s, idx, xf, t)
+    else:
+      {.error: "invalid type for JSON object".}
+
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int;
+                     t: typedesc; name: string) =
   dest = c_strtol(pqgetvalue(queryResult, queryI, idx.cint))
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64; t: typedesc) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64;
+                     t: typedesc; name: string) =
   dest = c_strtol(pqgetvalue(queryResult, queryI, idx.cint))
 
 proc fillString(dest: var string; src: cstring; srcLen: int) =
@@ -53,20 +82,43 @@ proc fillString(dest: var string; src: cstring; srcLen: int) =
   copyMem(unsafeAddr(dest[0]), src, srcLen)
   dest[srcLen] = '\0'
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string; t: typedesc) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
+                     t: typedesc; name: string) =
   let src = pqgetvalue(queryResult, queryI, idx.cint)
   let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
   fillString(dest, src, srcLen)
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64; t: typedesc) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
+                     t: typedesc; name: string) =
   dest = c_strtod(pqgetvalue(queryResult, queryI, idx.cint))
+
+template createJObject*(): untyped = newJObject()
+template createJArray*(): untyped = newJArray()
+
+template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc; name: string) =
+  let x = obj
+  doAssert x.kind == JObject
+  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
+    x[name] = newJNull()
+  else:
+    when t is string:
+      let dest = newJString(nil)
+      let src = pqgetvalue(queryResult, queryI, idx.cint)
+      let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
+      fillString(dest.src, src, srcLen)
+      x[name] = dest
+    elif (t is int) or (t is int64):
+      x[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
+    elif t is float64:
+      x[name] = newJFloat(c_strtod(pqgetvalue(queryResult, queryI, idx.cint)))
+    else:
+      {.error: "invalid type for JSON object".}
 
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):
-    var arr: array[pparams.len, cstring]
-    for i in 0..high(arr): arr[i] = cstring(pparams[i])
-    var queryResult {.inject.} = pqexecPrepared(db, s, int32(arr.len),
-            cast[cstringArray](addr arr), nil, nil, 0)
+    var queryResult {.inject.} = pqexecPrepared(db, s, int32(parr.len),
+            cast[cstringArray](addr parr), nil, nil, 0)
   else:
     var queryResult {.inject.} = pqexecPrepared(db, s, int32(0),
             nil, nil, nil, 0)

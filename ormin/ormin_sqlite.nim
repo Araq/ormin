@@ -12,43 +12,6 @@ type
   integer* = int
   timestamp* = string
 
-#[
-int sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int n, void(*)(void*));
-int sqlite3_bind_blob64(sqlite3_stmt*, int, const void*, sqlite3_uint64,
-                        void(*)(void*));
-int sqlite3_bind_double(sqlite3_stmt*, int, double);
-int sqlite3_bind_int(sqlite3_stmt*, int, int);
-int sqlite3_bind_int64(sqlite3_stmt*, int, sqlite3_int64);
-int sqlite3_bind_null(sqlite3_stmt*, int);
-int sqlite3_bind_text(sqlite3_stmt*,int,const char*,int,void(*)(void*));
-int sqlite3_bind_text16(sqlite3_stmt*, int, const void*, int, void(*)(void*));
-int sqlite3_bind_text64(sqlite3_stmt*, int, const char*, sqlite3_uint64,
-                        void(*)(void*), unsigned char encoding);
-int sqlite3_bind_value(sqlite3_stmt*, int, const sqlite3_value*);
-int sqlite3_bind_pointer(sqlite3_stmt*, int, void*, const char*,void(*)(void*));
-int sqlite3_bind_zeroblob(sqlite3_stmt*, int, int n);
-int sqlite3_bind_zeroblob64(sqlite3_stmt*, int, sqlite3_uint64);
-
-const void *sqlite3_column_blob(sqlite3_stmt*, int iCol);
-double sqlite3_column_double(sqlite3_stmt*, int iCol);
-int sqlite3_column_int(sqlite3_stmt*, int iCol);
-sqlite3_int64 sqlite3_column_int64(sqlite3_stmt*, int iCol);
-const unsigned char *sqlite3_column_text(sqlite3_stmt*, int iCol);
-const void *sqlite3_column_text16(sqlite3_stmt*, int iCol);
-sqlite3_value *sqlite3_column_value(sqlite3_stmt*, int iCol);
-int sqlite3_column_bytes(sqlite3_stmt*, int iCol);
-int sqlite3_column_type(sqlite3_stmt*, int iCol);
-
-const void *sqlite3_column_blob(sqlite3_stmt*, int iCol);
-int sqlite3_column_int(sqlite3_stmt*, int iCol);
-sqlite3_int64 sqlite3_column_int64(sqlite3_stmt*, int iCol);
-const unsigned char *sqlite3_column_text(sqlite3_stmt*, int iCol);
-const void *sqlite3_column_text16(sqlite3_stmt*, int iCol);
-sqlite3_value *sqlite3_column_value(sqlite3_stmt*, int iCol);
-int sqlite3_column_bytes(sqlite3_stmt*, int iCol);
-int sqlite3_column_type(sqlite3_stmt*, int iCol);
-]#
-
 proc dbError*(db: DbConn) {.noreturn.} =
   ## raises a DbError exception.
   var e: ref DbError
@@ -134,7 +97,6 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     when t is string:
-      doAssert x.kind == JString
       let dest = newJString(nil)
       let srcLen = column_bytes(s, idx.cint)
       let src = column_text(s, idx.cint)

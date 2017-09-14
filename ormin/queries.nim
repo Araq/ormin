@@ -354,15 +354,23 @@ proc cond(n: NimNode; q: var string; params: var Params;
   else:
     error "construct not supported in condition: " & treeRepr n, n
 
-proc generateIter(name: NimNode, q: QueryBuilder; sql: string): NimNode =
+proc generateRoutine(name: NimNode, q: QueryBuilder;
+                     sql: string; k: NimNodeKind): NimNode =
   let prepStmt = ident($name & "PrepStmt")
   let prepare = newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit(sql)))
 
-  let body = newStmtList(
-    newTree(nnkVarSection, newIdentDefs(ident"res", q.retType))
-  )
+  let body = newStmtList()
+
   var finalParams = newNimNode(nnkFormalParams)
-  finalParams.add q.retType
+  if q.retTypeIsJson:
+    if k == nnkIteratorDef:
+      body.add newVarStmt(ident"res", newCall(bindSym"createJObject"))
+    else:
+      body.add newAssignment(ident"result", newCall(bindSym"createJArray"))
+    finalParams.add ident"JsonNode"
+  else:
+    body.add newTree(nnkVarSection, newIdentDefs(ident"res", q.retType))
+    finalParams.add q.retType
   finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
   if q.params.len > 0:
@@ -373,26 +381,33 @@ proc generateIter(name: NimNode, q: QueryBuilder; sql: string): NimNode =
         body.add newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(i), p.ex, p.typ)
       else:
         finalParams.add newIdentDefs(p.ex, p.typ)
-        body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex)
+        body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex, p.typ)
       inc i
   body.add newCall(bindSym"startQuery", ident"db", prepStmt)
   let yld = newStmtList()
+  if k != nnkIteratorDef:
+    yld.add newVarStmt(ident"res", newCall(bindSym"createJObject"))
+  let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
   if q.retType.len > 1:
     var i = 0
     for r in q.retType:
       template resAt(res, i) = res[i]
-      yld.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(i),
-                      getAst(resAt(ident"res", i)))
+      yld.add newCall(fn, ident"db", prepStmt, newLit(i),
+                      getAst(resAt(ident"res", i)), copyNimTree r, newLit q.retNames[i])
       inc i
   else:
-    yld.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(0), ident"res")
-  yld.add newTree(nnkYieldStmt, ident"res")
+    yld.add newCall(fn, ident"db", prepStmt, newLit(0), ident"res",
+                    copyNimTree q.retType, newLit q.retNames[0])
+  if k == nnkIteratorDef:
+    yld.add newTree(nnkYieldStmt, ident"res")
+  else:
+    yld.add newCall("add", ident"result", ident"res")
 
   let whileStmt = newTree(nnkWhileStmt, newCall(bindSym"stepQuery", ident"db", prepStmt), yld)
   body.add whileStmt
   body.add newCall(bindSym"stopQuery", ident"db", prepStmt)
 
-  let iter = newTree(nnkIteratorDef,
+  let iter = newTree(k,
     name,
     newEmptyNode(),
     newEmptyNode(),
@@ -585,6 +600,14 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     expectLen n, 2
     let t = cond(n[1], q.offset, q.params, DbType(kind: dbInt), q)
     checkInt(t, n[1])
+  of "produce":
+    expectLen n, 2
+    if eqIdent(n[1], "json"):
+      q.retTypeIsJson = true
+    elif eqIdent(n[1], "nim"):
+      q.retTypeIsJson = false
+    else:
+      error "produce expects 'json' or 'nim', but got: " & repr(n[1]), n
   else:
     error "unknown query component " & repr(n), n
 
@@ -641,28 +664,31 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
     newGlobalVar(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   if q.retType.len > 0:
-    result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
+    if q.retTypeIsJson:
+      result.add newVarStmt(res, newCall(bindSym"createJObject"))
+    else:
+      result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
   let blk = newStmtList()
   var i = 1
   if q.params.len > 0:
     blk.add newCall(bindSym"startBindings", newLit(q.params.len))
     for p in q.params:
-      if p.isJson:
-        blk.add newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(i), p.ex, p.typ)
-      else:
-        blk.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex)
+      let fn = if p.isJson: bindSym"bindParamJson" else: bindSym"bindParam"
+      blk.add newCall(fn, ident"db", prepStmt, newLit(i), p.ex, p.typ)
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
   var body = newStmtList()
+  let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
   if q.retType.len > 1:
     var i = 0
     for r in q.retType:
       template resAt(res, i) = res[i]
-      body.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(i),
-                         getAst(resAt(res, i)))
+      body.add newCall(fn, ident"db", prepStmt, newLit(i),
+                         getAst(resAt(res, i)), r, newLit q.retNames[i])
       inc i
   elif q.retType.len > 0:
-    body.add newCall(bindSym"bindResult", ident"db", prepStmt, newLit(0), res)
+    body.add newCall(fn, ident"db", prepStmt, newLit(0),
+                    res, q.retType, newLit q.retNames[0])
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 
@@ -693,9 +719,7 @@ macro query*(body: untyped): untyped =
 macro tryQuery*(body: untyped): untyped =
   result = queryImpl(body, true)
 
-macro createIter*(name, query: untyped): untyped =
-  ## Creates an iterator of the given 'name' that iterates
-  ## over the result set as described in 'query'.
+proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList
   expectMinLen query, 1
 
@@ -704,8 +728,18 @@ macro createIter*(name, query: untyped): untyped =
     if b.kind == nnkCommand: queryh(b, q)
     else: error "illformed query", b
   if q.kind != qkSelect:
-    error "query for iterator must be a 'select'", query
+    error "query must be a 'select'", query
   let sql = queryAsString(q)
-  result = generateIter(name, q, sql)
+  result = generateRoutine(name, q, sql, k)
   when defined(debugOrminDsl):
     echo repr result
+
+macro createIter*(name, query: untyped): untyped =
+  ## Creates an iterator of the given 'name' that iterates
+  ## over the result set as described in 'query'.
+  result = createRoutine(name, query, nnkIteratorDef)
+
+macro createProc*(name, query: untyped): untyped =
+  ## Creates an iterator of the given 'name' that iterates
+  ## over the result set as described in 'query'.
+  result = createRoutine(name, query, nnkProcDef)

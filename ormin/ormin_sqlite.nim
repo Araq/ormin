@@ -62,19 +62,19 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
 
 template startBindings*(n: int) {.dirty.} = discard "nothing to do"
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: int) =
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: int; t: untyped) =
   if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
     dbError(db)
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: int64) =
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: int64; t: untyped) =
   if bind_int64(s, idx.cint, x) != SQLITE_OK:
     dbError(db)
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: string) =
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: string; t: untyped) =
   if bind_blob(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
     dbError(db)
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: float64) =
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: float64; t: untyped) =
   if bind_double(s, idx.cint, x) != SQLITE_OK:
     dbError(db)
 
@@ -87,34 +87,65 @@ template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
     when t is string:
       doAssert x.kind == JString
       let xs = x.str
-      bindParam(db, s, idx, xs)
+      bindParam(db, s, idx, xs, t)
     elif (t is int) or (t is int64):
       doAssert x.kind == JInt
       let xi = x.num
-      bindParam(db, s, idx, xi)
+      bindParam(db, s, idx, xi, t)
     elif t is float64:
       doAssert x.kind == JFloat
       let xf = x.fnum
-      bindParam(db, s, idx, xf)
+      bindParam(db, s, idx, xf, t)
     else:
       {.error: "invalid type for JSON object".}
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int;
+                     t: typedesc; name: string) =
   dest = int column_int64(s, idx.cint)
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64;
+                     t: typedesc; name: string) =
   dest = column_int64(s, idx.cint)
 
-proc bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string) =
-  let destLen = column_bytes(s, idx.cint)
-  if dest.isNil: dest = newString(destLen)
-  else: setLen(dest, destLen)
-  let src = column_text(s, idx.cint)
-  copyMem(unsafeAddr(dest[0]), src, destLen)
-  dest[destLen] = '\0'
+proc fillString(dest: var string; src: cstring; srcLen: int) =
+  if dest.isNil: dest = newString(srcLen)
+  else: setLen(dest, srcLen)
+  copyMem(unsafeAddr(dest[0]), src, srcLen)
+  dest[srcLen] = '\0'
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
+                     t: typedesc; name: string) =
+  let srcLen = column_bytes(s, idx.cint)
+  let src = column_text(s, idx.cint)
+  fillString(dest, src, srcLen)
+
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
+                     t: typedesc; name: string) =
   dest = column_double(s, idx.cint)
+
+template createJObject*(): untyped = newJObject()
+template createJArray*(): untyped = newJArray()
+
+template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc; name: string) =
+  let x = obj
+  doAssert x.kind == JObject
+  if column_type(s, idx.cint) == SQLITE_NULL:
+    x[name] = newJNull()
+  else:
+    when t is string:
+      doAssert x.kind == JString
+      let dest = newJString(nil)
+      let srcLen = column_bytes(s, idx.cint)
+      let src = column_text(s, idx.cint)
+      fillString(dest.str, src, srcLen)
+      x[name] = dest
+    elif (t is int) or (t is int64):
+      x[name] = newJInt(column_int64(s, idx.cint))
+    elif t is float64:
+      x[name] = newJFloat(column_double(s, idx.cint))
+    else:
+      {.error: "invalid type for JSON object".}
 
 template startQuery*(db: DbConn; s: PStmt) = discard "nothing to do"
 

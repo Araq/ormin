@@ -38,13 +38,13 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
 template startBindings*(n: int) {.dirty.} =
   var pparams: array[n, string]
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped) =
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: typedesc) =
   pparams[idx-1] = $x
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int; t: typedesc) =
   dest = c_strtol(pqgetvalue(queryResult, queryI, idx.cint))
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64; t: typedesc) =
   dest = c_strtol(pqgetvalue(queryResult, queryI, idx.cint))
 
 proc fillString(dest: var string; src: cstring; srcLen: int) =
@@ -53,12 +53,12 @@ proc fillString(dest: var string; src: cstring; srcLen: int) =
   copyMem(unsafeAddr(dest[0]), src, srcLen)
   dest[srcLen] = '\0'
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string; t: typedesc) =
   let src = pqgetvalue(queryResult, queryI, idx.cint)
   let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
   fillString(dest, src, srcLen)
 
-template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64) =
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64; t: typedesc) =
   dest = c_strtod(pqgetvalue(queryResult, queryI, idx.cint))
 
 template startQuery*(db: DbConn; s: PStmt) =

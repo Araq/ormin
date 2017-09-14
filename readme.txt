@@ -14,14 +14,13 @@ Features:
   no SQL injections possible.
 - Generated prepared statements: As fast as low level
   hand written API calls!
+- First class JSON support: No explicit conversions
+  from rows to JSON objects required.
 
 Todo:
 
 - Add support for UNION, INTERSECT and EXCEPT.
-- First class JSON support: No explicit conversions
-  from rows to JSON objects required.
 - Write mysql backend.
-
 
 Copyright (c) 2017 Andreas Rumpf.
 All rights reserved.

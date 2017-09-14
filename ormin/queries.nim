@@ -31,7 +31,7 @@ const
   ]
 
 type
-  Env = seq[int]
+  Env = seq[(int, string)]
 
 type
   QueryKind = enum
@@ -44,16 +44,20 @@ type
     qkDelete
   QueryBuilder = ref object
     head, fromm, join, values, where, groupby, having, orderby: string
-    env: seq[int]
+    env: Env
     kind: QueryKind
     params, retType: NimNode
-    coln, qmark: int
+    coln, qmark, aliasGen: int
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "",
     env: @[], kind: qkNone, params: newNimNode(nnkFormalParams),
-    retType: newNimNode(nnkPar), coln: 0, qmark: 0)
+    retType: newNimNode(nnkPar), coln: 0, qmark: 0, aliasGen: 1)
+
+proc getAlias(q: QueryBuilder; tabIndex: int): string =
+  result = tableNames[tabIndex][0] & $q.aliasGen
+  inc q.aliasGen
 
 proc placeholder(q: QueryBuilder): string =
   when dbBackend == DbBackend.postgre:
@@ -62,22 +66,34 @@ proc placeholder(q: QueryBuilder): string =
   else:
     result = "?"
 
-proc lookup(table, attr: string; env: Env): DbType =
+proc lookup(table, attr: string; env: Env; alias: var string): DbType =
   var candidate = -1
   for i, m in attributes:
-    if cmpIgnoreCase(m.name, attr) == 0 and m.tabIndex in env:
-      if table.len == 0 or cmpIgnoreCase(tableNames[m.tabIndex], table) == 0:
+    if cmpIgnoreCase(m.name, attr) == 0:
+      var inScope = false
+      for e in env:
+        if e[0] == m.tabIndex:
+          alias = e[1]
+          inScope = true
+          break
+      if (inScope and table.len == 0) or
+          cmpIgnoreCase(tableNames[m.tabIndex], table) == 0:
         # ambiguous match?
         if candidate < 0: candidate = i
         else: return DbType(kind: dbUnknown)
   result = if candidate < 0: DbType(kind: dbUnknown)
            else: DbType(kind: attributes[candidate].typ)
 
-proc autoJoin(join: var string, src, dest: int): bool =
+proc lookup(table, attr: string; env: Env): DbType =
+  var alias: string
+  result = lookup(table, attr, env, alias)
+
+proc autoJoin(join: var string, src: (int, string), dest: int;
+              destAlias: string): bool =
   var srcCol = -1
   var destCol = -1
   for i, a in attributes:
-    if a.tabIndex == src and a.key < 0 and attributes[-a.key - 1].tabIndex == dest:
+    if a.tabIndex == src[0] and a.key < 0 and attributes[-a.key - 1].tabIndex == dest:
       if srcCol < 0:
         srcCol = i
         destCol = -a.key - 1
@@ -85,9 +101,13 @@ proc autoJoin(join: var string, src, dest: int): bool =
         return false
   if srcCol >= 0:
     join.add " on "
-    join.add attributes[srcCol].name
-    join.add equals
+    join.add destAlias
+    join.add "."
     join.add attributes[destCol].name
+    join.add equals
+    join.add src[1]
+    join.add "."
+    join.add attributes[srcCol].name
     result = true
 
 proc `$`(a: DbType): string = $a.kind
@@ -122,10 +142,15 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       q.add "*"
       result = DbType(kind: dbUnknown)
     else:
-      escIdent(q, name)
-      result = lookup("", name, qb.env)
+      var alias: string
+      result = lookup("", name, qb.env, alias)
       if result.kind == dbUnknown:
         error "unknown column name: " & name, n
+      elif qb.kind in {qkSelect, qkJoin}:
+        doAssert alias.len >= 0
+        q.add alias
+        q.add '.'
+      escIdent(q, name)
   of nnkDotExpr:
     let t = $n[0]
     let a = $n[0]
@@ -260,7 +285,8 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       if tabIndex < 0:
         error "unknown table name: " & tab, n[1][0]
       else:
-        var subenv: seq[int] = @[tabIndex]
+        let alias = qb.getAlias(tabIndex)
+        var subenv = @[(tabIndex, alias)]
         swap(qb.env, subenv)
         var subselect = "select "
         for i in 1..<call.len:
@@ -268,13 +294,14 @@ proc cond(n: NimNode; q: var string; params: NimNode;
           discard cond(call[i], subselect, params, DbType(kind: dbUnknown), qb)
         subselect.add " from "
         escIdent(subselect, tab)
+        subselect.add " as " & alias
         q.add subselect
         swap(qb.env, subenv)
     elif n.len == 2 and $n[0] == "select" and n[1].kind == nnkCommand:
       result = DbType(kind: dbSet)
       let cmd = n[1]
       var subselect = "select "
-      var subenv: seq[int] = qb.env
+      var subenv = qb.env
       if cmd.len >= 1 and cmd[0].kind == nnkCall:
         let call = cmd[0]
         let tab = $call[0]
@@ -282,12 +309,14 @@ proc cond(n: NimNode; q: var string; params: NimNode;
         if tabIndex < 0:
           error "unknown table name: " & tab, n[1][0]
         else:
-          qb.env = @[tabindex]
+          let alias = qb.getAlias(tabIndex)
+          qb.env = @[(tabindex, alias)]
           for i in 1..<call.len:
             if i > 1: subselect.add ", "
             discard cond(call[i], subselect, params, DbType(kind: dbUnknown), qb)
           subselect.add " from "
           escIdent(subselect, tab)
+          subselect.add " as " & alias
       if cmd.len >= 2 and cmd[1].kind in nnkCallKinds and $cmd[1][0] == "where":
         subselect.add " where "
         discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
@@ -350,14 +379,16 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     if tabIndex < 0:
       error "unknown table name: " & tab, n
       return
+    let alias = q.getAlias(tabIndex)
     if q.kind == qkSelect:
       escIdent(q.fromm, tab)
+      q.fromm.add " as " & alias
     elif q.kind != qkJoin:
       escIdent(q.head, tab)
     if q.kind == qkUpdate: q.head.add " set "
     elif q.kind notin {qkSelect, qkJoin}: q.head.add "("
 
-    q.env.add tabindex
+    q.env.add((tabindex, alias))
     for i in 1..<call.len:
       let col = call[i]
       if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkUpdate, qkInsert}:
@@ -408,7 +439,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
       error "unknown table name: " & tab, n
       return
     escIdent(q.head, tab)
-    q.env.add tabindex
+    q.env.add((tabindex, q.getAlias(tabIndex)))
   elif n.kind == nnkRStrLit:
     q.head.add n.strVal
   else:
@@ -462,8 +493,10 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         error "unknown table name: " & tab, n
       else:
         escIdent(q.join, tab)
+        let alias = q.getAlias(tabIndex)
+        q.join.add " as " & alias
         var oldEnv = q.env
-        q.env = @[tabIndex]
+        q.env = @[(tabIndex, alias)]
         q.kind = qkJoin
         tableSel(cmd[0], q)
         swap q.env, oldEnv
@@ -478,11 +511,13 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       if tabIndex < 0:
         error "unknown table name: " & tab, n
       else:
+        let alias = q.getAlias(tabIndex)
         escIdent(q.join, tab)
-        if not autoJoin(q.join, q.env[^1], tabIndex):
-          error "cannot compute auto join from: " & tableNames[q.env[^1]] & " to: " & tab, n
+        q.join.add " as " & alias
+        if not autoJoin(q.join, q.env[^1], tabIndex, alias):
+          error "cannot compute auto join from: " & tableNames[q.env[^1][0]] & " to: " & tab, n
         var oldEnv = q.env
-        q.env = @[tabIndex]
+        q.env = @[(tabIndex, alias)]
         q.kind = qkJoin
         tableSel(n[1], q)
         swap q.env, oldEnv

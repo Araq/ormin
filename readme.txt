@@ -22,7 +22,6 @@ Todo:
 - Add support for LIMIT and OFFSET.
 - First class JSON support: No explicit conversions
   from rows to JSON objects required.
-- Generate 'table.column' for disambiguation.
 - Write mysql backend.
 
 

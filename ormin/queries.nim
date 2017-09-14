@@ -181,7 +181,7 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       checkCompatible(a, b, n[i])
     q.add ")"
     result = DbType(kind: dbSet)
-  of nnkStrLit, nnkTripleStrLit:
+  of nnkStrLit, nnkRStrLit, nnkTripleStrLit:
     result = expected
     if result.kind == dbUnknown:
       error "cannot infer the type of the literal", n
@@ -189,11 +189,6 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       q.add(escape(n.strVal, "b'", "'"))
     else:
       q.add(escape(n.strVal, "'", "'"))
-  of nnkRStrLit:
-    result = expected
-    if result.kind == dbUnknown:
-      error "cannot infer the type of the literal", n
-    q.add n.strVal
   of nnkIntLit..nnkInt64Lit:
     result = expected
     if result.kind == dbUnknown:
@@ -262,6 +257,13 @@ proc cond(n: NimNode; q: var string; params: NimNode;
       q.add "not "
       let a = cond(n[1], q, params, result, qb)
       checkBool a, n[1]
+    of "!!":
+      result = expected
+      if result.kind == dbUnknown:
+        error "cannot infer the type of the literal", n
+      let arg = n[1]
+      if arg.kind in {nnkStrLit..nnkTripleStrLit}: q.add arg.strVal
+      else: q.add repr(n[1])
     else:
       # treat as arithmetic operator:
       q.add ' '

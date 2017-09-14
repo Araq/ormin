@@ -36,15 +36,15 @@ let something = query:
   limit 1
 
 query:
-  insert person(?name, password = ?pw, ?email, ?salt, status = r"'EmailUnconfirmed'",
-         lastOnline = r"DATETIME('now')")
+  insert person(?name, password = ?pw, ?email, ?salt, status = !!"'EmailUnconfirmed'",
+         lastOnline = !!"DATETIME('now')")
 
 query:
   delete session
   where ip == ?ip and password == ?pw
 
 query:
-  update session(lastModified = r"DATETIME('now')")
+  update session(lastModified = !!"DATETIME('now')")
   where ip == ?ip and password == ?pw
 
 let userId1 = query:
@@ -56,11 +56,11 @@ let (name9, email9, status, ban) = query:
   where id == ?id
 
 query:
-  update person(lastOnline = r"DATETIME('now')")
+  update person(lastOnline = !!"DATETIME('now')")
   where id == ?id
 
 query:
-  update thread(views = views + 1, modified = r"DATETIME('now')")
+  update thread(views = views + 1, modified = !!"DATETIME('now')")
   where id == ?id
 
 query:

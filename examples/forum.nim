@@ -3,7 +3,12 @@ import "../ormin", json
 
 importModel(DbBackend.sqlite, "examples", "forum_model")
 
-let db = open("stuff", "", "", "")
+var db {.global.} = open("stuff", "", "", "")
+
+#var db: DbConn
+#proc getPrepStmt(idx: int): PStmt
+
+#var gPrepStmts: array[N, cstring]
 
 const
   id = 90
@@ -80,6 +85,13 @@ let (authorB, creationB) = query:
 let allPosts = query:
   select post(count(_) as cnt)
   where cnt > 0
+  produce json
+
+createProc getAllThreadIds:
+  select thread(id)
+  where id == ?id
+  produce json
+
 
 #query:
 #  update thread(modified = (select post(creation) where post.thread == ?thread

@@ -69,6 +69,11 @@ let (author, creation) = query:
   select post(author)
   join person(creation)
 
+let (authorB, creationB) = query:
+  select post(author)
+  join person(creation) on author == id
+
+
 #query:
 #  update thread(modified = (select post(creation) where post.thread == ?thread
 #    orderby creation desc limit 1 ))

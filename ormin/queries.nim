@@ -452,14 +452,28 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     if kind == "outerjoin": q.join.add "\Louter join "
     else: q.join.add "\Linner join "
     expectLen n, 2
-    if n[1].kind == nnkCommand and $n[1][0] == "on":
+    let cmd = n[1]
+    if cmd.kind == nnkCommand and cmd.len == 2 and
+       cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on" and
+       cmd[0].kind == nnkCall:
+      let tab = $cmd[0][0]
+      let tabIndex = tableNames.find(tab)
+      if tabIndex < 0:
+        error "unknown table name: " & tab, n
+      else:
+        escIdent(q.join, tab)
+        var oldEnv = q.env
+        q.env = @[tabIndex]
+        q.kind = qkJoin
+        tableSel(cmd[0], q)
+        swap q.env, oldEnv
+      let onn = cmd[1][1]
       q.join.add " on "
-      expectLen n[1], 2
-      let t = cond(n[1][1], q.join, q.params, DbType(kind: dbBool), q)
-      checkBool(t, n[1])
-    elif n[1].kind == nnkCall:
+      let t = cond(onn, q.join, q.params, DbType(kind: dbBool), q)
+      checkBool(t, onn)
+    elif cmd.kind == nnkCall:
       # auto join:
-      let tab = $n[1][0]
+      let tab = $cmd[0]
       let tabIndex = tableNames.find(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n
@@ -489,11 +503,11 @@ proc queryh(n: NimNode; q: QueryBuilder) =
 
 proc queryAsString(q: QueryBuilder): string =
   result = q.head
-  if q.join.len > 0:
-    result.add q.join
   if q.fromm.len > 0:
     result.add "\Lfrom "
     result.add q.fromm
+  if q.join.len > 0:
+    result.add q.join
   if q.values.len > 0:
     result.add "\Lvalues ("
     result.add q.values

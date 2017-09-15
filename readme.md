@@ -19,7 +19,6 @@ Features:
 
 Todo:
 
-- Find a way to support 'case when end'
 - Add support for UNION, INTERSECT and EXCEPT.
 - Write mysql backend.
 

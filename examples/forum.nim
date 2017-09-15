@@ -35,7 +35,7 @@ query:
   insert antibot(?ip, ?answer)
 
 let something = query:
-  select antibot(answer)
+  select antibot(answer, (if ip == "hi": 0 else: 1))
   where ip == ?ip
   orderby desc(ip)
   limit 1

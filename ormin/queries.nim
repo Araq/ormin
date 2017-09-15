@@ -174,7 +174,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
     q.add '.'
     escIdent(q, a)
     result = lookup(t, a, qb.env)
-  of nnkPar:
+  of nnkPar, nnkStmtListExpr:
     if n.len == 1:
       q.add "("
       result = cond(n[0], q, params, expected, qb)
@@ -303,6 +303,23 @@ proc cond(n: NimNode; q: var string; params: var Params;
         else:
           error "function " & op & " takes " & $f.arity & " arguments", n
     error "unknown function " & op
+  of nnkIfStmt, nnkIfExpr:
+    q.add "\Lcase "
+    result = DbType(kind: dbUnknown)
+    for x in n:
+      case x.kind
+      of nnkElifBranch, nnkElifExpr:
+        q.add "\L  when "
+        checkBool(cond(x[0], q, params, DbType(kind: dbBool), qb), x[0])
+        q.add " then"
+      of nnkElse, nnkElseExpr:
+        q.add "\L  else"
+      else: error "illformed if expression", n
+      q.add "\L    "
+      let t = cond(x[^1], q, params, result, qb)
+      if result.kind == dbUnknown: result = t
+      else: checkCompatible(result, t, x)
+    q.add "\Lend"
   of nnkCommand:
     # select subquery
     if n.len == 2 and $n[0] == "select" and n[1].kind == nnkCall:
@@ -425,9 +442,17 @@ proc getColumnName(n: NimNode): string =
     if $n[0] == "as": result = getColumnName(n[2])
   of nnkIdent, nnkSym:
     result = $n
-  else: discard
-  if result.len == 0:
-    error "cannot extract column name of: " & repr(n), n
+  else:
+    # this is a little hacky, if the column name starts with
+    # a space, it means "could not extract the column name"
+    # but we need to emit this error lazily:
+    result = " " & repr(n)
+
+proc retName(q: QueryBuilder; i: int; n: NimNode): string =
+  result = q.retNames[i]
+  if q.retTypeIsJson and result.startsWith(" "):
+    error "cannot extract column name of:" & result, n
+    result = ""
 
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
@@ -684,11 +709,11 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
     for r in q.retType:
       template resAt(res, i) = res[i]
       body.add newCall(fn, ident"db", prepStmt, newLit(i),
-                         getAst(resAt(res, i)), r, newLit q.retNames[i])
+                         getAst(resAt(res, i)), r, newLit retName(q, i, body))
       inc i
   elif q.retType.len > 0:
     body.add newCall(fn, ident"db", prepStmt, newLit(0),
-                    res, q.retType, newLit q.retNames[0])
+                    res, q.retType, newLit retName(q, 0, body))
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 

@@ -2,32 +2,9 @@
 import asynchttpserver, asyncdispatch, asyncnet, "../../websocket/websocket", json,
   strutils, times
 
-when false:
-  type
-    MessageId = distinct int
-    MessageKind = enum # serialized so add new values to the end!
-      msgSelect,
-      msgUpdate,
-      msgInsert,
-      msgDelete,
-      msgDisconnect
-    Message = object
-      kind: MessageKind
-      id: MessageId
-      data: JsonNode
-      version: int
-
 type
   ReqHandler* = proc (msg: JsonNode; broadcast: var bool): JsonNode {.
     closure, gcsafe.}
-
-when false:
-  proc `%`(id: MessageId): JsonNode = %BiggestInt(id)
-  proc `%`(k: MessageKind): JsonNode = %BiggestInt(k)
-
-  proc messageFromJson(j: JsonNode): Message =
-    Message(kind: MessageKind(j["kind"].getNum), id: MessageId(j["id"].num),
-            data: j["data"], version: j["version"].num.int)
 
 proc error(msg: string) = echo "[Error] ", msg
 proc warn(msg: string) = echo "[Warning] ", msg

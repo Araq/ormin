@@ -141,7 +141,10 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
   result = 0
 
 proc generateCode(infile, outfile: string; target: Target) =
-  let sql = parseSql(newFileStream(infile, fmRead), infile)
+  let stream = newFileStream(infile, fmRead)
+  if stream.isNil:
+    quit "fatal: cannot open " & infile
+  let sql = parseSql(stream, infile)
   var knownTables = initOrderedTable[string, DbColumns]()
   collectTables(sql, knownTables)
   var f: File

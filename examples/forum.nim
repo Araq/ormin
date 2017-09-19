@@ -61,6 +61,7 @@ let userId1 = query:
 let (name9, email9, status, ban) = query:
   select person(name, email, status, ban)
   where id == ?id
+  limit 1
 
 query:
   update person(lastOnline = !!"DATETIME('now')")
@@ -77,15 +78,18 @@ query:
 let (author, creation) = query:
   select post(author)
   join person(creation)
+  limit 1
 
 let (authorB, creationB) = query:
   select post(author)
   join person(creation) on author == id
+  limit 1
 
 let allPosts = query:
   select post(count(_) as cnt)
   where cnt > 0
   produce json
+  limit 1
 
 createProc getAllThreadIds:
   select thread(id)

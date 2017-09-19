@@ -83,11 +83,12 @@ proc processMessage(server: Server, client: Client, data: string) {.async.} =
     server.needsUpdate = true
   else:
     let resp = server.handler(msgj, broadcast)
-    if broadcast:
-      server.msgs.add(($resp, client.id))
-      server.needsUpdate = true
-    else:
-      await client.socket.sendText($resp, false)
+    if not resp.isNil:
+      if broadcast:
+        server.msgs.add(($resp, client.id))
+        server.needsUpdate = true
+      else:
+        await client.socket.sendText($resp, false)
 
 proc processClient(server: Server, client: Client) {.async.} =
   while client.connected:
@@ -103,9 +104,10 @@ proc processClient(server: Server, client: Client) {.async.} =
     if frame.opcode == Opcode.Text:
       let processFut = processMessage(server, client, frame.data)
       if processFut.failed:
+        echo processFut.error.getStackTrace()
         error("Client ($1) attempted to send bad JSON? " % $client & "\n" &
               processFut.error.msg)
-        client.connected = false
+        #client.connected = false
 
   client.socket.close()
 

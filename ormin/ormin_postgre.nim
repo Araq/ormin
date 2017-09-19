@@ -35,7 +35,7 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
   var res = pqprepare(db, result, q, 0, nil)
   if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 
-template startBindings*(n: int) {.dirty.} =
+template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive
   # for the duration of the query. This is safer than relying
   # on the conservative stack marking:
@@ -129,7 +129,7 @@ template startQuery*(db: DbConn; s: PStmt) =
 template stopQuery*(db: DbConn; s: PStmt) =
   pqclear(queryResult)
 
-template stepQuery*(db: DbConn; s: PStmt): bool =
+template stepQuery*(db: DbConn; s: PStmt; returnsData: int): bool =
   inc queryI
   queryI < queryLen
 

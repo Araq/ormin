@@ -23,7 +23,8 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
   if prepare_v2(db, q, q.len.cint, result, nil) != SQLITE_OK:
     dbError(db)
 
-template startBindings*(n: int) {.dirty.} = discard "nothing to do"
+template startBindings*(s: PStmt; n: int) =
+  if clear_bindings(s) != SQLITE_OK: dbError(db)
 
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: int; t: untyped) =
   if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
@@ -112,10 +113,13 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
 template startQuery*(db: DbConn; s: PStmt) = discard "nothing to do"
 
 template stopQuery*(db: DbConn; s: PStmt) =
-  if finalize(s) != SQLITE_OK: dbError(db)
+  if sqlite3.reset(s) != SQLITE_OK: dbError(db)
 
-template stepQuery*(db: DbConn; s: PStmt): bool =
-  step(s) == SQLITE_ROW
+template stepQuery*(db: DbConn; s: PStmt; returnsData: int): bool =
+  when returnsData == 1:
+    step(s) == SQLITE_ROW
+  else:
+    step(s) == SQLITE_DONE
 
 template getLastId*(db: DbConn; s: PStmt): int =
   int(last_insert_rowid(db))

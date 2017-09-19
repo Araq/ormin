@@ -49,7 +49,7 @@ type
     env: Env
     kind: QueryKind
     retType: NimNode
-    retTypeIsJson: bool
+    singleRow, retTypeIsJson: bool
     retNames: seq[string]
     params: Params
     coln, qmark, aliasGen: int
@@ -59,7 +59,8 @@ proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "", limit: "", offset: "",
     env: @[], kind: qkNone, params: @[],
-    retType: newNimNode(nnkPar), retTypeIsJson: false, retNames: @[],
+    retType: newNimNode(nnkPar), singleRow: false,
+    retTypeIsJson: false, retNames: @[],
     coln: 0, qmark: 0, aliasGen: 1, colAliases: @[])
 
 proc getAlias(q: QueryBuilder; tabIndex: int): string =
@@ -391,7 +392,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
   if q.params.len > 0:
-    body.add newCall(bindSym"startBindings", newLit(q.params.len))
+    body.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
     for p in q.params:
       if p.isJson:
         finalParams.add newIdentDefs(p.ex, ident"JsonNode")
@@ -408,9 +409,10 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   if q.retType.len > 1:
     var i = 0
     for r in q.retType:
-      template resAt(res, i) = res[i]
+      template resAt(i) {.dirty.} = res[i]
+      let resx = if q.retTypeIsJson: ident"res" else: getAst(resAt(newLit(i)))
       yld.add newCall(fn, ident"db", prepStmt, newLit(i),
-                      getAst(resAt(ident"res", i)), copyNimTree r, newLit q.retNames[i])
+                      resx, copyNimTree r, newLit q.retNames[i])
       inc i
   else:
     yld.add newCall(fn, ident"db", prepStmt, newLit(0), ident"res",
@@ -420,7 +422,8 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   else:
     yld.add newCall("add", ident"result", ident"res")
 
-  let whileStmt = newTree(nnkWhileStmt, newCall(bindSym"stepQuery", ident"db", prepStmt), yld)
+  let whileStmt = newTree(nnkWhileStmt,
+    newCall(bindSym"stepQuery", ident"db", prepStmt, newLit 1), yld)
   body.add whileStmt
   body.add newCall(bindSym"stopQuery", ident"db", prepStmt)
 
@@ -619,6 +622,8 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     checkBool(t, n[1])
   of "limit":
     expectLen n, 2
+    if n[1].kind == nnkIntLit and n[1].intVal == 1:
+      q.singleRow = true
     let t = cond(n[1], q.limit, q.params, DbType(kind: dbInt), q)
     checkInt(t, n[1])
   of "offset":
@@ -689,49 +694,79 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
     newGlobalVar(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   if q.retType.len > 0:
-    if q.retTypeIsJson:
-      result.add newVarStmt(res, newCall(bindSym"createJObject"))
+    if q.singleRow:
+      if q.retTypeIsJson:
+        result.add newVarStmt(res, newCall(bindSym"createJObject"))
+      else:
+        result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
     else:
-      result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
+      if q.retTypeIsJson:
+        result.add newVarStmt(res, newCall(bindSym"createJArray"))
+      else:
+        result.add newTree(nnkVarSection, newIdentDefs(res,
+          newTree(nnkBracketExpr, bindSym"seq", q.retType),
+          newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
   let blk = newStmtList()
   var i = 1
   if q.params.len > 0:
-    blk.add newCall(bindSym"startBindings", newLit(q.params.len))
+    blk.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
     for p in q.params:
       let fn = if p.isJson: bindSym"bindParamJson" else: bindSym"bindParam"
       blk.add newCall(fn, ident"db", prepStmt, newLit(i), p.ex, p.typ)
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
   var body = newStmtList()
+  let it = if q.singleRow: res else: genSym(nskVar)
+  if not q.singleRow and q.retType.len > 0:
+    if q.retTypeIsJson:
+      result.add newVarStmt(it, newCall(bindSym"createJObject"))
+    else:
+      result.add newTree(nnkVarSection, newIdentDefs(it, q.retType))
+
   let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
   if q.retType.len > 1:
     var i = 0
     for r in q.retType:
-      template resAt(res, i) = res[i]
+      template resAt(x, i) {.dirty.} = x[i]
+      let resx = if q.retTypeIsJson: it else: getAst(resAt(it, newLit(i)))
+
       body.add newCall(fn, ident"db", prepStmt, newLit(i),
-                         getAst(resAt(res, i)), r, newLit retName(q, i, body))
+                       resx, r, newLit retName(q, i, body))
       inc i
   elif q.retType.len > 0:
     body.add newCall(fn, ident"db", prepStmt, newLit(0),
-                    res, q.retType, newLit retName(q, 0, body))
+                     it, q.retType, newLit retName(q, 0, body))
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 
-  template ifStmt2(prepStmt, action) {.dirty.} =
-    if stepQuery(db, prepStmt):
+  template ifStmt2(prepStmt, returnsData, action) {.dirty.} =
+    if stepQuery(db, prepStmt, returnsData):
       action
+      stopQuery(db, prepStmt)
     else:
+      stopQuery(db, prepStmt)
       dbError(db)
 
-  template ifStmt1(prepStmt, action) {.dirty.} =
-    if stepQuery(db, prepStmt):
+  template ifStmt1(prepStmt, returnsData, action) {.dirty.} =
+    if stepQuery(db, prepStmt, returnsData):
       action
+    stopQuery(db, prepStmt)
 
-  if attempt:
-    blk.add getAst(ifStmt1(prepStmt, body))
+  template whileStmt(prepStmt, res, it, action) {.dirty.} =
+    while stepQuery(db, prepStmt, 1):
+      action
+      add res, it
+    stopQuery(db, prepStmt)
+
+  let returnsData = q.kind in {qkSelect, qkJoin}
+  if not q.singleRow and q.retType.len > 0:
+    blk.add getAst(whileStmt(prepStmt, res, it, body))
   else:
-    blk.add getAst(ifStmt2(prepStmt, body))
-  blk.add newCall(bindSym"stopQuery", ident"db", prepStmt)
+    if attempt:
+      blk.add getAst(ifStmt1(prepStmt, returnsData, body))
+    else:
+      blk.add getAst(ifStmt2(prepStmt, returnsData, body))
+
   result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
   if q.retType.len > 0:
     result.add res

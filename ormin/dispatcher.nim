@@ -33,9 +33,9 @@ macro createDispatcher*(name, n: untyped): untyped =
   result = newStmtList()
   let disp = newTree(nnkCaseStmt, ident"cmd")
   template cmdProc(name, body) {.dirty.} =
-    proc name(db: DbConn; arg: JsonNode): JsonNode = body
+    proc name(arg: JsonNode): JsonNode = body
   template callCmd(name) {.dirty.} =
-    result = name(db, arg)
+    result = name(arg)
 
   for x in n:
     if x.kind == nnkCall and x.len == 2 and
@@ -49,7 +49,7 @@ macro createDispatcher*(name, n: untyped): untyped =
   disp.add newTree(nnkElse, newStmtList(newTree(nnkDiscardStmt, newEmptyNode())))
 
   template dispatchProc(name, body) {.dirty.} =
-    proc dispatch(db: DbConn; inp: JsonNode): JsonNode =
+    proc dispatch(inp: JsonNode): JsonNode =
       let arg = inp["arg"]
       let cmd = inp["cmd"].getStr("")
       body

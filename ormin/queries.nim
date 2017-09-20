@@ -719,9 +719,9 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
   let it = if q.singleRow: res else: genSym(nskVar)
   if not q.singleRow and q.retType.len > 0:
     if q.retTypeIsJson:
-      result.add newVarStmt(it, newCall(bindSym"createJObject"))
+      body.add newVarStmt(it, newCall(bindSym"createJObject"))
     else:
-      result.add newTree(nnkVarSection, newIdentDefs(it, q.retType))
+      body.add newTree(nnkVarSection, newIdentDefs(it, q.retType))
 
   let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
   if q.retType.len > 1:

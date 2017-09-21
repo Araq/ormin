@@ -65,6 +65,10 @@ template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
       doAssert x.kind == JFloat
       let xf = x.fnum
       bindParam(db, s, idx, xf, t)
+    elif t is bool:
+      doAssert x.kind == JBool
+      let xb = x.bval
+      bindParam(db, s, idx, xb, t)
     else:
       {.error: "invalid type for JSON object".}
 
@@ -75,6 +79,13 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int;
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64;
                      t: typedesc; name: string) =
   dest = c_strtol(pqgetvalue(queryResult, queryI, idx.cint))
+
+# XXX This needs testing:
+template isTrue(x): untyped = x[0] == 't'
+
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
+                     t: typedesc; name: string) =
+  dest = isTrue(pqgetvalue(queryResult, queryI, idx.cint))
 
 proc fillString(dest: var string; src: cstring; srcLen: int) =
   if dest.isNil: dest = newString(srcLen)
@@ -112,6 +123,8 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
       x[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
     elif t is float64:
       x[name] = newJFloat(c_strtod(pqgetvalue(queryResult, queryI, idx.cint)))
+    elif t is bool:
+      x[name] = newJBool(isTrue(pqgetvalue(queryResult, queryI, idx.cint)))
     else:
       {.error: "invalid type for JSON object".}
 

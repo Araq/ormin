@@ -30,6 +30,10 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x: int; t: untyped) =
   if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
     dbError(db)
 
+template bindParam*(db: DbConn; s: PStmt; idx: int; x: bool; t: untyped) =
+  if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
+    dbError(db)
+
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: int64; t: untyped) =
   if bind_int64(s, idx.cint, x) != SQLITE_OK:
     dbError(db)
@@ -60,6 +64,10 @@ template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
       doAssert x.kind == JFloat
       let xf = x.fnum
       bindParam(db, s, idx, xf, t)
+    elif t is bool:
+      doAssert x.kind == JBool
+      let xb = x.bval
+      bindParam(db, s, idx, xb, t)
     else:
       {.error: "invalid type for JSON object".}
 
@@ -87,6 +95,10 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
   dest = column_double(s, idx.cint)
 
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
+                     t: typedesc; name: string) =
+  dest = column_int64(s, idx.cint) != 0
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -107,6 +119,8 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
       x[name] = newJInt(column_int64(s, idx.cint))
     elif t is float64:
       x[name] = newJFloat(column_double(s, idx.cint))
+    elif t is bool:
+      x[name] = newJBool(column_int64(s, idx.cint) != 0)
     else:
       {.error: "invalid type for JSON object".}
 

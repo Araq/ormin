@@ -63,6 +63,11 @@ let (name9, email9, status, ban) = query:
   where id == ?id
   limit 1
 
+let (idg, nameg, pwg, emailg, creationg, saltg, statusg, lastOnlineg, bang) = query:
+  select person(_)
+  where id == ?id
+  limit 1
+
 query:
   update person(lastOnline = !!"DATETIME('now')")
   where id == ?id

@@ -135,9 +135,11 @@ proc checkCompatible(a, b: DbType; n: NimNode) =
 proc checkCompatibleSet(a, b: DbType; n: NimNode) =
   discard "too implement; might require a richer type system"
 
-proc toNimType(t: DbType): NimNode {.compileTime.} =
-  let name = ($t.kind).substr(2).toLowerAscii
+proc toNimType(t: DbTypeKind): NimNode {.compileTime.} =
+  let name = ($t).substr(2).toLowerAscii
   result = ident(name)
+
+proc toNimType(t: DbType): NimNode {.compileTime.} = toNimType(t.kind)
 
 proc escIdent(dest: var string; src: string) =
   if allCharsInSet(src, {'\33'..'\127'}):
@@ -457,6 +459,49 @@ proc retName(q: QueryBuilder; i: int; n: NimNode): string =
     error "cannot extract column name of:" & result, n
     result = ""
 
+proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
+  proc fieldImpl(q: QueryBuilder; arg: NimNode; name: string): NimNode =
+    if q.retTypeIsJson:
+      result = newTree(nnkBracketExpr, arg, newLit(name))
+    else:
+      result = newTree(nnkDotExpr, arg, ident(name))
+  template field(): untyped = fieldImpl(q, arg, a.name)
+  case q.kind
+  of qkSelect, qkJoin:
+    for a in attributes:
+      if a.tabIndex == tabIndex:
+        if q.coln > 0: q.head.add ", "
+        inc q.coln
+        let t = a.typ
+        q.retType.add toNimType(t)
+        q.retNames.add a.name
+        doAssert q.env.len > 0
+        q.head.add q.env[^1][1]
+        q.head.add '.'
+        escIdent(q.head, a.name)
+  of qkInsert, qkReplace:
+    for a in attributes:
+      # we do not set the primary key:
+      if a.tabIndex == tabIndex and a.key != 1:
+        if q.coln > 0: q.head.add ", "
+        escIdent(q.head, a.name)
+        inc q.coln
+        q.params.add((ex: field(), typ: toNimType(a.typ), isJson: q.retTypeIsJson))
+        if q.values.len > 0: q.values.add ", "
+        q.values.add placeholder(q)
+  of qkUpdate:
+    for a in attributes:
+      if a.tabIndex == tabIndex and a.key != 1:
+        if q.coln > 0: q.head.add ", "
+        escIdent(q.head, a.name)
+        inc q.coln
+        q.params.add((ex: field(), typ: toNimType(a.typ), isJson: q.retTypeIsJson))
+        q.head.add " = "
+        q.head.add placeholder(q)
+  else:
+    error "select '_' not supported for this construct", lineInfo
+
+
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
     let call = n
@@ -477,22 +522,25 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     q.env.add((tabindex, alias))
     for i in 1..<call.len:
       let col = call[i]
-      if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkUpdate, qkInsert}:
+      if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkUpdate, qkReplace}:
         let colname = $col[0]
-        let coltype = lookup("", colname, q.env)
-        if coltype.kind == dbUnknown:
-          error "unkown column name: " & colname, col
+        if colname == "_":
+          selectAll(q, tabIndex, col[1], col)
         else:
-          if q.coln > 0: q.head.add ", "
-          escIdent(q.head, colname)
-          #q.params.add newIdentDefs(col[1], toNimType(coltype))
-          inc q.coln
-        if q.kind == qkInsert:
-          if q.values.len > 0: q.values.add ", "
-          discard cond(col[1], q.values, q.params, coltype, q)
-        else:
-          q.head.add " = "
-          discard cond(col[1], q.head, q.params, coltype, q)
+          let coltype = lookup("", colname, q.env)
+          if coltype.kind == dbUnknown:
+            error "unkown column name: " & colname, col
+          else:
+            if q.coln > 0: q.head.add ", "
+            escIdent(q.head, colname)
+            #q.params.add newIdentDefs(col[1], toNimType(coltype))
+            inc q.coln
+          if q.kind == qkUpdate:
+            q.head.add " = "
+            discard cond(col[1], q.head, q.params, coltype, q)
+          else:
+            if q.values.len > 0: q.values.add ", "
+            discard cond(col[1], q.values, q.params, coltype, q)
 
       elif col.kind == nnkPrefix and (let op = $col[0]; op == "?" or op == "%"):
         let colname = $col[1]
@@ -504,12 +552,14 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           escIdent(q.head, colname)
           inc q.coln
           q.params.add((ex: col[1], typ: toNimType(coltype), isJson: op == "%"))
-        if q.kind == qkInsert:
-          if q.values.len > 0: q.values.add ", "
-          q.values.add placeholder(q)
-        else:
+        if q.kind == qkUpdate:
           q.head.add " = "
           q.head.add placeholder(q)
+        else:
+          if q.values.len > 0: q.values.add ", "
+          q.values.add placeholder(q)
+      elif col.kind == nnkIdent and $col == "_":
+        selectAll(q, tabIndex, ident"arg", col)
       elif q.kind in {qkSelect, qkJoin}:
         if q.coln > 0: q.head.add ", "
         inc q.coln

@@ -33,5 +33,6 @@ protocol "examples/forumclient.nim":
     send(allSessions)
   client:
     type Session = ref object
+    var gSessions: seq[Session]
     gSessions = recv()
     proc getAllSessions()

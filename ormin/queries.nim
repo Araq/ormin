@@ -916,14 +916,15 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
     let p = n.params
     if p.len == 1:
       n.body = getAst(sendReqImplNoArg(b.msgId))
-      b.procs.add n
     else:
       expectLen p, 2
       expectKind p[1], nnkIdentDefs
       n.body = getAst(sendReqImpl(p[1][0], b.msgId))
-      b.procs.add n
+    b.procs.add n
     return newTree(nnkNone)
-
+  elif n.kind in {nnkLetSection, nnkVarSection}:
+    b.procs.add n
+    return newTree(nnkNone)
   result = copyNimNode(n)
   for i in 0 ..< n.len:
     let x = transformClient(n[i], b)

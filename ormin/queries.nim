@@ -730,7 +730,7 @@ proc newGlobalVar(name, value: NimNode): NimNode =
   )
 
 proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
-  if retType.len > 0 and not singleRow:
+  if not singleRow:
     result = newTree(nnkBracketExpr, bindSym"seq", retType)
   else:
     result = retType
@@ -887,7 +887,8 @@ proc addFields(n: NimNode; b: ProtoBuilder): NimNode =
     expectKind x, nnkRecList
     doAssert b.retType.len == b.retNames.len, "ormin: types and column names do not match"
     for i in 0 ..< b.retType.len:
-      x.add newTree(nnkIdentDefs, ident(b.retNames[i]), b.retType[i], newEmptyNode())
+      x.add newTree(nnkIdentDefs, newTree(nnkPostfix, ident"*", ident(b.retNames[i])),
+                    b.retType[i], newEmptyNode())
     return n
   result = copyNimNode(n)
   for i in 0 ..< n.len:
@@ -902,6 +903,7 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
   template sendReqImplNoArg(msgkind): untyped {.dirty.} =
     let req = newJObject()
     req["cmd"] = %msgkind
+    req["arg"] = newJNull()
     send(req)
   if n.kind in nnkCallKinds and n[0].kind == nnkIdent and $n[0] == "recv":
     expectLen n, 1

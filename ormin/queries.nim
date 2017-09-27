@@ -218,11 +218,12 @@ proc cond(n: NimNode; q: var string; params: var Params;
       q.add ' '
       let b = cond(n[2], q, params, result, qb)
       checkBool b, n[2]
-    of "<=", "<", ">=", ">", "==", "!=":
+    of "<=", "<", ">=", ">", "==", "!=", "=~":
       let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
       q.add ' '
       if op == "==": q.add equals
       elif op == "!=": q.add nequals
+      elif op == "=~": q.add "like"
       else: q.add op
       q.add ' '
       let b = cond(n[2], q, params, a, qb)
@@ -254,6 +255,12 @@ proc cond(n: NimNode; q: var string; params: var Params;
       qb.colAliases.add((alias, result))
       if expected.kind != dbUnknown:
         checkCompatible result, expected, n
+    of "&":
+      let a = cond(n[1], q, params, DbType(kind: dbVarchar), qb)
+      q.add " || "
+      let b = cond(n[2], q, params, a, qb)
+      checkCompatible a, b, n
+      result = DbType(kind: dbVarchar)
     else:
       # treat as arithmetic operator:
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)

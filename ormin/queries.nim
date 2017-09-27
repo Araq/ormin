@@ -867,7 +867,7 @@ macro createProc*(name, query: untyped): untyped =
 type
   ProtoBuilder = ref object
     msgId: int
-    dispClient, types, procs, retType: NimNode
+    dispClient, types, server, procs, retType: NimNode
     retNames: seq[string]
     foundObj, singleRow: bool
 
@@ -968,13 +968,22 @@ proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
       let op = $n[0]
       case op
       of "server":
+        expectLen n, 2
         return newTree(nnkOfBranch, newLit(b.msgId), transformServer(n[1], b))
       of "client":
+        expectLen n, 2
         var clientPart = transformClient(n[1], b)
         if clientPart.kind == nnkNone or (clientPart.kind == nnkStmtList and clientPart.len == 0):
           clientPart = newStmtList(newTree(nnkDiscardStmt, newEmptyNode()))
         b.dispClient.add newTree(nnkOfBranch, newLit(b.msgId+1), clientPart)
         inc b.msgId, 2
+        return newTree(nnkNone)
+      of "common":
+        expectLen n, 2
+        expectKind n[1], nnkStmtList
+        for s in n[1]:
+          b.types.add copyNimTree(s)
+          b.server.add s
         return newTree(nnkNone)
   else: discard
   result = copyNimNode(n)
@@ -996,7 +1005,7 @@ macro protocol*(name: static[string]; body: untyped): untyped =
       body
 
   var b = ProtoBuilder(msgId: 0, dispClient: newTree(nnkCaseStmt, ident"cmd"),
-    types: newStmtList(), procs: newStmtList())
+    types: newStmtList(), procs: newStmtList(), server: newStmtList())
   let branches = protoImpl(body, b)
   b.dispClient.add newTree(nnkElse, newStmtList(newTree(nnkDiscardStmt, newEmptyNode())))
   let disp = newTree(nnkCaseStmt, ident"cmd")
@@ -1011,6 +1020,7 @@ macro protocol*(name: static[string]; body: untyped): untyped =
     assert xx.kind != nnkStmtList
   writeFile(name, repr clientBody)
 
-  result = getAst(serverProc(disp))
+  b.server.add getAst(serverProc(disp))
+  result = b.server
   when defined(debugOrminDsl):
     echo repr result

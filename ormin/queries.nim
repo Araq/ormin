@@ -729,11 +729,17 @@ proc newGlobalVar(name, value: NimNode): NimNode =
       newTree(nnkPragma, ident"global")), newEmptyNode(), value)
   )
 
-proc queryImpl(body: NimNode; attempt: bool): NimNode =
+proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
+  if retType.len > 0 and not singleRow:
+    result = newTree(nnkBracketExpr, bindSym"seq", retType)
+  else:
+    result = retType
+
+proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimNode =
   expectKind body, nnkStmtList
   expectMinLen body, 1
 
-  var q = newQueryBuilder()
+  q.retTypeIsJson = produceJson
   for b in body:
     if b.kind == nnkCommand: queryh(b, q)
     else: error "illformed query", b
@@ -820,14 +826,18 @@ proc queryImpl(body: NimNode; attempt: bool): NimNode =
   result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
   if q.retType.len > 0:
     result.add res
+
+macro query*(body: untyped): untyped =
+  var q = newQueryBuilder()
+  result = queryImpl(q, body, false, false)
   when defined(debugOrminDsl):
     echo repr result
 
-macro query*(body: untyped): untyped =
-  result = queryImpl(body, false)
-
 macro tryQuery*(body: untyped): untyped =
-  result = queryImpl(body, true)
+  var q = newQueryBuilder()
+  result = queryImpl(q, body, true, false)
+  when defined(debugOrminDsl):
+    echo repr result
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList
@@ -853,3 +863,154 @@ macro createProc*(name, query: untyped): untyped =
   ## Creates an iterator of the given 'name' that iterates
   ## over the result set as described in 'query'.
   result = createRoutine(name, query, nnkProcDef)
+
+type
+  ProtoBuilder = ref object
+    msgId: int
+    dispClient, types, procs, retType: NimNode
+    retNames: seq[string]
+    foundObj, singleRow: bool
+
+proc getTypename(n: NimNode): NimNode =
+  result = n[0][0]
+  if result.kind == nnkPostfix:
+    result = result[1]
+
+proc addFields(n: NimNode; b: ProtoBuilder): NimNode =
+  if n.kind == nnkObjectTy and not b.foundObj:
+    b.foundObj = true
+    expectLen n, 3
+    var x = n[2]
+    if x.kind == nnkEmpty:
+      x = newTree(nnkRecList)
+      n[2] = x
+    expectKind x, nnkRecList
+    doAssert b.retType.len == b.retNames.len, "ormin: types and column names do not match"
+    for i in 0 ..< b.retType.len:
+      x.add newTree(nnkIdentDefs, ident(b.retNames[i]), b.retType[i], newEmptyNode())
+    return n
+  result = copyNimNode(n)
+  for i in 0 ..< n.len:
+    result.add addFields(n[i], b)
+
+proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
+  template sendReqImpl(x, msgkind): untyped {.dirty.} =
+    let req = newJObject()
+    req["cmd"] = %msgkind
+    req["arg"] = cast[JsonNode](x)
+    send(req)
+  template sendReqImplNoArg(msgkind): untyped {.dirty.} =
+    let req = newJObject()
+    req["cmd"] = %msgkind
+    send(req)
+  if n.kind in nnkCallKinds and n[0].kind == nnkIdent and $n[0] == "recv":
+    expectLen n, 1
+    return newTree(nnkCast, makeSeq(b.retType, b.singleRow), ident"data")
+  elif n.kind == nnkTypeSection:
+    b.foundObj = false
+    let t = addFields(n, b)
+    b.retType = getTypename(n)
+    b.types.add t
+    return newTree(nnkNone)
+  elif n.kind == nnkProcDef:
+    let p = n.params
+    if p.len == 1:
+      n.body = getAst(sendReqImplNoArg(b.msgId))
+      b.procs.add n
+    else:
+      expectLen p, 2
+      expectKind p[1], nnkIdentDefs
+      n.body = getAst(sendReqImpl(p[1][0], b.msgId))
+      b.procs.add n
+    return newTree(nnkNone)
+
+  result = copyNimNode(n)
+  for i in 0 ..< n.len:
+    let x = transformClient(n[i], b)
+    if x.kind != nnkNone: result.add x
+
+proc transformServer(n: NimNode; b: ProtoBuilder): NimNode =
+  template sendImpl(x, msgkind): untyped {.dirty.} =
+    result = newJObject()
+    result["cmd"] = %msgkind
+    result["data"] = x
+
+  if n.kind in nnkCallKinds and n[0].kind == nnkIdent:
+    case $n[0]
+    of "send":
+      expectLen n, 2
+      return getAst(sendImpl(n[1], b.msgId+1))
+    of "query":
+      expectLen n, 2
+      var qb = newQueryBuilder()
+      let q = queryImpl(qb, n[1], false, true)
+      b.retType = qb.retType
+      b.singleRow = qb.singleRow
+      b.retNames = qb.retNames
+      return q
+    of "tryQuery":
+      expectLen n, 2
+      var qb = newQueryBuilder()
+      let q = queryImpl(qb, n[1], true, true)
+      b.retType = qb.retType
+      b.singleRow = qb.singleRow
+      b.retNames = qb.retNames
+      return q
+
+  result = copyNimNode(n)
+  for i in 0 ..< n.len:
+    result.add transformServer(n[i], b)
+
+proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
+  case n.kind
+  of nnkCallKinds:
+    if n[0].kind == nnkIdent:
+      let op = $n[0]
+      case op
+      of "server":
+        return newTree(nnkOfBranch, newLit(b.msgId), transformServer(n[1], b))
+      of "client":
+        var clientPart = transformClient(n[1], b)
+        if clientPart.kind == nnkNone or (clientPart.kind == nnkStmtList and clientPart.len == 0):
+          clientPart = newStmtList(newTree(nnkDiscardStmt, newEmptyNode()))
+        b.dispClient.add newTree(nnkOfBranch, newLit(b.msgId+1), clientPart)
+        inc b.msgId, 2
+        return newTree(nnkNone)
+  else: discard
+  result = copyNimNode(n)
+  for i in 0 ..< n.len:
+    let x = protoImpl(n[i], b)
+    if x.kind != nnkNone: result.add x
+
+macro protocol*(name: static[string]; body: untyped): untyped =
+  template serverProc(body) {.dirty.} =
+    proc dispatch(inp: JsonNode): JsonNode =
+      let arg = inp["arg"]
+      let cmd = inp["cmd"].getNum()
+      body
+
+  template clientProc(body) {.dirty.} =
+    proc recvMsg*(inp: JsonNode) =
+      let data = inp["data"]
+      let cmd = inp["cmd"].getNum()
+      body
+
+  var b = ProtoBuilder(msgId: 0, dispClient: newTree(nnkCaseStmt, ident"cmd"),
+    types: newStmtList(), procs: newStmtList())
+  let branches = protoImpl(body, b)
+  b.dispClient.add newTree(nnkElse, newStmtList(newTree(nnkDiscardStmt, newEmptyNode())))
+  let disp = newTree(nnkCaseStmt, ident"cmd")
+  for branch in branches: disp.add branch
+  disp.add newTree(nnkElse, newStmtList(newTree(nnkDiscardStmt, newEmptyNode())))
+
+  let client = getAst(clientProc(b.dispClient))
+  var clientBody = b.types
+  for prc in b.procs: clientBody.add prc
+  clientBody.add client
+  for xx in clientBody:
+    assert xx.kind != nnkStmtList
+  writeFile(name, repr clientBody)
+
+  result = getAst(serverProc(disp))
+  when defined(debugOrminDsl):
+    echo repr result

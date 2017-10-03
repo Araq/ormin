@@ -27,9 +27,7 @@ const
     Function(name: "avg", arity: 1, typ: dbFloat),
     Function(name: "sum", arity: 1, typ: dbUnknown),
     Function(name: "isnull", arity: 3, typ: dbUnknown),
-    Function(name: "concat", arity: -1, typ: dbVarchar),
-    Function(name: "asc", arity: 1, typ: dbUnknown),
-    Function(name: "desc", arity: 1, typ: dbUnknown)
+    Function(name: "concat", arity: -1, typ: dbVarchar)
   ]
 
 type
@@ -186,7 +184,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       error "tuple construction not allowed here", n
   of nnkCurly:
     q.add "("
-    let a = cond(n[0], q, params, DbType(kind: dbUnknown), qb)
+    let a = cond(n[0], q, params, expected, qb)
     for i in 1..<n.len:
       q.add ", "
       let b = cond(n[i], q, params, a, qb)
@@ -243,7 +241,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       else:
         if op == "in": q.add " in "
         else: q.add " not in "
-        let b = cond(n[2], q, params, DbType(kind: dbUnknown), qb)
+        let b = cond(n[2], q, params, a, qb)
         checkCompatibleSet a, b, n
       result = DbType(kind: dbBool)
     of "as":
@@ -300,6 +298,12 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
   of nnkCall:
     let op = $n[0]
+    if op == "asc" or op == "desc":
+      expectLen n, 2
+      result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
+      q.add ' '
+      q.add op
+      return
     for f in functions:
       if f.name == op:
         if f.arity == n.len-1 or (f.arity == -1 and n.len > 1):

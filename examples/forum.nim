@@ -18,6 +18,16 @@ const
   email = "some@body.com"
   salt = "pepper"
   name = "me"
+  limit = 10
+  offset = 5
+
+let threads = query:
+  select thread(id, name, views, modified)
+  where id in (select post(thread) where author in
+      (select person(id) where status notin ("Spammer") or id == ?id))
+  orderby desc(modified)
+  limit ?limit
+  offset ?offset
 
 let thisThread = tryQuery:
   select thread(id)

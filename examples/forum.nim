@@ -10,6 +10,8 @@ var db {.global.} = open("stuff", "", "", "")
 
 #var gPrepStmts: array[N, cstring]
 
+type inet = string
+
 const
   id = 90
   ip = "moo"

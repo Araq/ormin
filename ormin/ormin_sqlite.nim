@@ -26,25 +26,19 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
 template startBindings*(s: PStmt; n: int) =
   if clear_bindings(s) != SQLITE_OK: dbError(db)
 
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: int; t: untyped) =
-  if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
-    dbError(db)
-
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: bool; t: untyped) =
-  if bind_int64(s, idx.cint, x.int64) != SQLITE_OK:
-    dbError(db)
-
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: int64; t: untyped) =
-  if bind_int64(s, idx.cint, x) != SQLITE_OK:
-    dbError(db)
-
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: string; t: untyped) =
-  if bind_blob(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
-    dbError(db)
-
-template bindParam*(db: DbConn; s: PStmt; idx: int; x: float64; t: untyped) =
-  if bind_double(s, idx.cint, x) != SQLITE_OK:
-    dbError(db)
+template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
+  when not (x is t):
+    {.error: "type mismatch for query argument at position " & $idx.}
+  when t is int or t is int64 or t is bool:
+    if bind_int64(s, idx.cint, x.int64) != SQLITE_OK: dbError(db)
+  elif t is string:
+    if bind_blob(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
+      dbError(db)
+  elif t is float64:
+    if bind_double(s, idx.cint, x) != SQLITE_OK:
+      dbError(db)
+  else:
+    {.error: "type mismatch for query argument at position " & $idx.}
 
 template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
                         t: typedesc) =
@@ -55,19 +49,21 @@ template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
     when t is string:
       doAssert x.kind == JString
       let xs = x.str
-      bindParam(db, s, idx, xs, t)
+      if bind_blob(s, idx.cint, cstring(xs), xs.len.cint, SQLITE_STATIC) != SQLITE_OK:
+        dbError(db)
     elif (t is int) or (t is int64):
       doAssert x.kind == JInt
       let xi = x.num
-      bindParam(db, s, idx, xi, t)
+      if bind_int64(s, idx.cint, xi.int64) != SQLITE_OK: dbError(db)
     elif t is float64:
       doAssert x.kind == JFloat
       let xf = x.fnum
-      bindParam(db, s, idx, xf, t)
+      if bind_double(s, idx.cint, xf) != SQLITE_OK:
+        dbError(db)
     elif t is bool:
       doAssert x.kind == JBool
       let xb = x.bval
-      bindParam(db, s, idx, xb, t)
+      if bind_int64(s, idx.cint, xb.int64) != SQLITE_OK: dbError(db)
     else:
       {.error: "invalid type for JSON object".}
 

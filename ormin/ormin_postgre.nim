@@ -43,6 +43,12 @@ template startBindings*(s: PStmt; n: int) {.dirty.} =
   var parr: array[n, cstring]
 
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
+  when not (x is t):
+    {.error: "type mismatch for query argument at position " & $idx.}
+  pparams[idx-1] = $x
+  parr[idx-1] = cstring(pparams[idx-1])
+
+template bindParamUnchecked(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
   pparams[idx-1] = $x
   parr[idx-1] = cstring(pparams[idx-1])
 
@@ -56,19 +62,19 @@ template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
     when t is string:
       doAssert x.kind == JString
       let xs = x.str
-      bindParam(db, s, idx, xs, t)
+      bindParamUnchecked(db, s, idx, xs, t)
     elif (t is int) or (t is int64):
       doAssert x.kind == JInt
       let xi = x.num
-      bindParam(db, s, idx, xi, t)
+      bindParamUnchecked(db, s, idx, xi, t)
     elif t is float64:
       doAssert x.kind == JFloat
       let xf = x.fnum
-      bindParam(db, s, idx, xf, t)
+      bindParamUnchecked(db, s, idx, xf, t)
     elif t is bool:
       doAssert x.kind == JBool
       let xb = x.bval
-      bindParam(db, s, idx, xb, t)
+      bindParamUnchecked(db, s, idx, xb, t)
     else:
       {.error: "invalid type for JSON object".}
 

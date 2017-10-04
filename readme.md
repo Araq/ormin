@@ -1,6 +1,5 @@
-================
-     ormin
-================
+ormin
+=====
 
 Prepared SQL statement generator for Nim. A lightweight ORM.
 
@@ -20,6 +19,7 @@ Features:
 Todo:
 
 - Add support for UNION, INTERSECT and EXCEPT.
+- Better support for complex nested queries.
 - Write mysql backend.
 
 Copyright (c) 2017 Andreas Rumpf.

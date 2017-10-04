@@ -111,6 +111,11 @@ createProc getAllThreadIds:
   where id == ?id
   produce json
 
+let totalThreads = query:
+  select thread(count(_))
+  where id in (select post(thread) where author == ?id and id in (
+    select post(min(id)) groupby thread))
+  limit 1
 
 #query:
 #  update thread(modified = (select post(creation) where post.thread == ?thread

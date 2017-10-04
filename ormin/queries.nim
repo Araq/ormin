@@ -375,9 +375,17 @@ proc cond(n: NimNode; q: var string; params: var Params;
           subselect.add " from "
           escIdent(subselect, tab)
           subselect.add " as " & alias
-      if cmd.len >= 2 and cmd[1].kind in nnkCallKinds and $cmd[1][0] == "where":
-        subselect.add " where "
-        discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
+      if cmd.len == 2:
+        if cmd[1].kind in nnkCallKinds and $cmd[1][0] == "where":
+          subselect.add " where "
+          discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
+        elif cmd[1].kind in nnkCallKinds and $cmd[1][0] == "groupby":
+          subselect.add " group by "
+          discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
+        else:
+          error "construct not supported in condition: " & treeRepr cmd, cmd
+      elif cmd.len >= 2:
+        error "construct not supported in condition: " & treeRepr cmd, cmd
       qb.env = subenv
       q.add subselect
     else:

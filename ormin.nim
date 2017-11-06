@@ -24,7 +24,7 @@ template importModel*(backend: DbBackend; path, filename: string) {.dirty.} =
   elif dbBackend == DbBackend.mysql:
     import ormin/ormin_mysql
   else:
-    {.error: "uknown database backend".}
+    {.error: "unknown database backend".}
 
   include filename
   include "ormin/queries"

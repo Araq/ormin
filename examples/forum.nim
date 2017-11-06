@@ -1,7 +1,7 @@
 
 import "../ormin", json
 
-importModel(DbBackend.sqlite, "examples", "forum_model")
+importModel(DbBackend.sqlite, "forum_model")
 
 var db {.global.} = open("stuff", "", "", "")
 

@@ -7,11 +7,12 @@ import os
 
 template importModel*(backend: DbBackend; filename: string) {.dirty.} =
   ## imports a model from an SQL file.
-  bind fileExists, addFileExt, staticExec, ExeExt, `/`
+  bind fileExists, addFileExt, staticExec, ExeExt, parentDir, `/`
   static:
     #when not fileExists(addFileExt("tools/ormin_importer", ExeExt)):
     #  echo staticExec("nim c tools/ormin_importer", "", "tools/ormin_importer.nim")
-    echo staticExec("tools/ormin_importer " & (currentSourcePath() / filename) & ".sql")
+    let path = parentDir(instantiationInfo(-1, true)[0])
+    echo staticExec("tools/ormin_importer " & (path / filename) & ".sql")
 
   const dbBackend = backend
 

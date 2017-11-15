@@ -63,7 +63,7 @@ protocol "chatclient.nim":
     proc sendMessage*(m: TextMessage)
     allMessages.add recv(TextMessage)
 
-  # This is the request to register a new user:
+  # This is the request to register/login a new user:
   server:
     var candidates = query:
       produce nim

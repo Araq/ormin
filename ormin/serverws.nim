@@ -1,6 +1,8 @@
 
-import asynchttpserver, asyncdispatch, asyncnet, "../../websocket/websocket", json,
+import asynchttpserver, asyncdispatch, asyncnet, json,
   strutils, times
+
+import websocket
 
 type
   Receivers* {.pure} = enum

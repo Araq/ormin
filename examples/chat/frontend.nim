@@ -33,18 +33,24 @@ proc send(msg: JsonNode) =
 type User* = ref object
   name*, password: kstring
 
+const
+  username = kstring"username"
+  password = kstring"password"
+  message = kstring"message"
+
 # Include the 'chatclient' helper that Ormin produced for us:
 include chatclient
 
 template loggedIn(): bool = userId > 0
 
-const
-  username = kstring"username"
-  password = kstring"password"
-
 proc doLogin() =
   registerUser(User(name: getVNodeById(username).text,
                 password: getVNodeById(password).text))
+
+proc doSendMessage() =
+  let inputField = getVNodeById(message)
+  sendMessage(TextMessage(author: userId, content: inputField.text))
+  inputField.setInputText ""
 
 proc registerOnUpdate() =
   conn.onmessage =
@@ -66,15 +72,20 @@ proc main(): VNode =
           text getError(username)
         p:
           text getError(password)
-
-    table:
-      for m in allMessages:
-        tr:
-          td:
-            bold:
-              text m.name
-          td:
-            text m.content
+    tdiv:
+      table:
+        for m in allMessages:
+          tr:
+            td:
+              bold:
+                text m.name
+            td:
+              text m.content
+    tdiv:
+      if loggedIn:
+        label(`for` = message):
+          text "Message: "
+        input(class = "input", id = message, onkeyupenter = doSendMessage)
 
 registerOnUpdate()
 runLater proc() =

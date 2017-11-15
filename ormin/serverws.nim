@@ -3,7 +3,9 @@ import asynchttpserver, asyncdispatch, asyncnet, "../../websocket/websocket", js
   strutils, times
 
 type
-  ReqHandler* = proc (msg: JsonNode; broadcast: var bool): JsonNode {.
+  Receivers* {.pure} = enum
+    sender, allExceptSender, all
+  ReqHandler* = proc (msg: JsonNode; receivers: var Receivers): JsonNode {.
     closure, gcsafe.}
 
 proc error(msg: string) = echo "[Error] ", msg
@@ -22,6 +24,7 @@ type
   Server = ref object
     clients: seq[Client]
     needsUpdate: bool
+    receivers: Receivers
     msgs: seq[(string, int)]
     gid: int
     handler: ReqHandler
@@ -51,7 +54,7 @@ proc updateClients(server: Server) {.async.} =
         for c in server.clients:
           if c.connected:
             # do not send a broadcast message to the one which sent it:
-            if c.id != m[1]:
+            if server.receivers != Receivers.allExceptSender or c.id != m[1]:
               await c.socket.sendText(m[0], false)
           else:
             someDead = true
@@ -77,18 +80,18 @@ proc processMessage(server: Server, client: Client, data: string) {.async.} =
     warn("Client ($1) is firing messages too rapidly. Killing." % $client)
     client.connected = false
   let msgj = parseJson(data)
-  var broadcast = false
+  server.receivers = Receivers.sender
   if msgj.hasKey("msg") and msgj["msg"].getStr("") == "disconnect":
     client.connected = false
     server.needsUpdate = true
   else:
-    let resp = server.handler(msgj, broadcast)
+    let resp = server.handler(msgj, server.receivers)
     if not resp.isNil:
-      if broadcast:
+      if server.receivers == sender:
+        await client.socket.sendText($resp, false)
+      else:
         server.msgs.add(($resp, client.id))
         server.needsUpdate = true
-      else:
-        await client.socket.sendText($resp, false)
 
 proc processClient(server: Server, client: Client) {.async.} =
   while client.connected:

@@ -41,11 +41,7 @@ protocol "chatclient.nim":
 
   # This is the request to send a new chat message:
   server:
-    let userId = query:
-      produce nim
-      select users(id)
-      where name == %arg["author"]
-      limit 1
+    let userId = arg["author"].num
     # unregistered users cannot send anything:
     if userId == 0: return
     query:
@@ -60,33 +56,43 @@ protocol "chatclient.nim":
       orderby desc(creation)
       limit 1
 
-    broadcast = true
+    receivers = Receivers.all
     send(lastMessage)
 
   client:
     proc sendMessage*(m: TextMessage)
-
+    allMessages.add recv(TextMessage)
 
   # This is the request to register a new user:
   server:
-    var userId = query:
+    var candidates = query:
       produce nim
-      select users(id)
+      select users(id, password)
       where name == %arg["name"]
-      limit 1
-    if userId == 0:
+    if candidates.len == 0:
       query:
-        insert users(name = %arg["name"])
-      userId = query:
+        insert users(name = %arg["name"], password = %arg["password"])
+      let userId = query:
         produce nim
         select users(id)
-        where name == %arg["name"]
+        where name == %arg["name"] and password == %arg["password"]
         limit 1
-    send(%userId)
+      send(%userId)
+    else:
+      block search:
+        for c in candidates:
+          if c[1] == arg["password"].str:
+            send(%c[0])
+            echo "login found!"
+            break search
+        # invalid login:
+        send(%0)
+        echo "no such user!"
   client:
     proc registerUser*(u: User)
     var userId: int
     userId = recv()
+    if userId == 0: setError(username, "invalid login!")
 
 
 serve "orminchat", dispatch

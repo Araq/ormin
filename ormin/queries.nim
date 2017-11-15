@@ -926,8 +926,13 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
     req["arg"] = newJNull()
     send(req)
   if n.kind in nnkCallKinds and n[0].kind == nnkIdent and $n[0] == "recv":
-    expectLen n, 1
-    return newTree(nnkCast, makeSeq(b.retType, b.singleRow), ident"data")
+    var castDest: NimNode
+    if n.len == 2:
+      castDest = n[1]
+    else:
+      expectLen n, 1
+      castDest = makeSeq(b.retType, b.singleRow)
+    return newTree(nnkCast, castDest, ident"data")
   elif n.kind == nnkTypeSection:
     b.foundObj = false
     let t = addFields(n, b)
@@ -1018,7 +1023,7 @@ proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
 
 macro protocol*(name: static[string]; body: untyped): untyped =
   template serverProc(body) {.dirty.} =
-    proc dispatch(inp: JsonNode; broadcast: var bool): JsonNode =
+    proc dispatch(inp: JsonNode; receivers: var Receivers): JsonNode =
       let arg = inp["arg"]
       let cmd = inp["cmd"].getNum()
       body

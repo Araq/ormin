@@ -27,8 +27,8 @@ template startBindings*(s: PStmt; n: int) =
   if clear_bindings(s) != SQLITE_OK: dbError(db)
 
 template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
-  when not (x is t):
-    {.error: "type mismatch for query argument at position " & $idx.}
+  #when not (x is t):
+  #  {.error: "type mismatch for query argument at position " & $idx.}
   when t is int or t is int64 or t is bool:
     if bind_int64(s, idx.cint, x.int64) != SQLITE_OK: dbError(db)
   elif t is string:

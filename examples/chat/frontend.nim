@@ -6,9 +6,6 @@ import karax / [kbase, karax, vdom, karaxdsl, kajax, jwebsockets, jjson,
 
 # Custom UI element with input validation:
 
-type
-  Validator* = proc (field: kstring): proc ()
-
 proc validateNotEmpty(field: kstring): proc () =
   result = proc () =
     let x = getVNodeById(field)
@@ -17,7 +14,8 @@ proc validateNotEmpty(field: kstring): proc () =
     else:
       setError(field, "")
 
-proc loginField(desc, field, class: kstring; validator: Validator): VNode =
+proc loginField(desc, field, class: kstring;
+                validator: proc (field: kstring): proc ()): VNode =
   result = buildHtml(tdiv):
     label(`for` = field):
       text desc

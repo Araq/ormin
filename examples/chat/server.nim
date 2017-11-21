@@ -14,24 +14,23 @@ var db {.global.} = open("chat.db", "", "", "")
 protocol "chatclient.nim":
   # A 'common' code section is shared by both the client and the server:
   common:
-    when defined(js):
-      type kstring = cstring
-    else:
+    when not defined(js):
       type kstring = string
     type
       inet = kstring
       varchar = kstring
       timestamp = kstring
 
-  # This is the initial request, it gives us the last 100 messages:
-  server:
+
+  server "get recent messages":
     let lastMessages = query:
       select messages(content, creation, author)
       join users(name)
       orderby desc(creation)
       limit 100
     send(lastMessages)
-  client:
+
+  client "get recent messages":
     type TextMessage* = ref object
     # Ormin fills in the fields of 'TextMessage' for us, based on the
     # query in the 'server' part.
@@ -39,8 +38,8 @@ protocol "chatclient.nim":
     proc getRecentMessages*()
     allMessages = recv()
 
-  # This is the request to send a new chat message:
-  server:
+
+  server "send chat message":
     let userId = arg["author"].num
     # unregistered users cannot send anything:
     if userId == 0: return
@@ -56,15 +55,15 @@ protocol "chatclient.nim":
       orderby desc(creation)
       limit 1
 
-    receivers = Receivers.all
-    send(lastMessage)
+    broadcast(lastMessage)
 
-  client:
+  client "send chat message":
     proc sendMessage*(m: TextMessage)
     allMessages.add recv(TextMessage)
 
+
   # This is the request to register/login a new user:
-  server:
+  server "register/login a new user":
     var candidates = query:
       produce nim
       select users(id, password)
@@ -88,7 +87,8 @@ protocol "chatclient.nim":
         # invalid login:
         send(%0)
         echo "no such user!"
-  client:
+
+  client "register/login a new user":
     proc registerUser*(u: User)
     var userId: int
     userId = recv()

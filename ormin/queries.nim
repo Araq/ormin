@@ -704,7 +704,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     expectLen n, 2
     if eqIdent(n[1], "json"):
       q.retTypeIsJson = true
-    elif eqIdent(n[1], "nim"):
+    elif eqIdent(n[1], "nim") or eqIdent(n[1], "tuple"):
       q.retTypeIsJson = false
     else:
       error "produce expects 'json' or 'nim', but got: " & repr(n[1]), n
@@ -890,6 +890,7 @@ type
     dispClient, types, server, procs, retType: NimNode
     retNames: seq[string]
     foundObj, singleRow: bool
+    sectionName: string
 
 proc getTypename(n: NimNode): NimNode =
   result = n[0][0]
@@ -960,16 +961,19 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
     if x.kind != nnkNone: result.add x
 
 proc transformServer(n: NimNode; b: ProtoBuilder): NimNode =
-  template sendImpl(x, msgkind): untyped {.dirty.} =
+  template sendImpl(x, msgkind, broadcast): untyped {.dirty.} =
+    when broadcast:
+      receivers = Receivers.all
     result = newJObject()
     result["cmd"] = %msgkind
     result["data"] = x
 
   if n.kind in nnkCallKinds and n[0].kind == nnkIdent:
     case $n[0]
-    of "send":
+    of "send", "broadcast":
+      let broad = $n[0] == "broadcast"
       expectLen n, 2
-      return getAst(sendImpl(n[1], b.msgId+1))
+      return getAst(sendImpl(n[1], b.msgId+1, broad))
     of "query":
       expectLen n, 2
       var qb = newQueryBuilder()
@@ -998,11 +1002,18 @@ proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
       let op = $n[0]
       case op
       of "server":
-        expectLen n, 2
-        return newTree(nnkOfBranch, newLit(b.msgId), transformServer(n[1], b))
+        expectLen n, 2, 3
+        if n.len == 3:
+          expectKind(n[1], nnkStrLit)
+          b.sectionName = n[1].strVal
+        return newTree(nnkOfBranch, newLit(b.msgId), transformServer(n[^1], b))
       of "client":
-        expectLen n, 2
-        var clientPart = transformClient(n[1], b)
+        expectLen n, 2, 3
+        if n.len == 3:
+          expectKind(n[1], nnkStrLit)
+          if b.sectionName != n[1].strVal:
+            error "section names of client/server pair do not match", n[1]
+        var clientPart = transformClient(n[^1], b)
         if clientPart.kind == nnkNone or (clientPart.kind == nnkStmtList and clientPart.len == 0):
           clientPart = newStmtList(newTree(nnkDiscardStmt, newEmptyNode()))
         b.dispClient.add newTree(nnkOfBranch, newLit(b.msgId+1), clientPart)

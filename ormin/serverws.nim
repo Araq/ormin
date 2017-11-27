@@ -72,13 +72,14 @@ proc updateClients(server: Server) {.async.} =
 proc processMessage(server: Server, client: Client, data: string) {.async.} =
   # Check if last message was relatively recent. If so, kick the user.
   echo "processMessage ", data
-  if epochTime() - client.lastMessage < 0.1: # 100ms
+  let now = epochTime()
+  if now - client.lastMessage < 0.1: # 100ms
     client.rapidMessageCount.inc
   else:
     client.rapidMessageCount = 0
 
-  client.lastMessage = epochTime()
-  if client.rapidMessageCount > 10:
+  client.lastMessage = now
+  if client.rapidMessageCount > 50:
     warn("Client ($1) is firing messages too rapidly. Killing." % $client)
     client.connected = false
   let msgj = parseJson(data)
@@ -113,7 +114,6 @@ proc processClient(server: Server, client: Client) {.async.} =
         error("Client ($1) attempted to send bad JSON? " % $client & "\n" &
               processFut.error.msg)
         #client.connected = false
-
   client.socket.close()
 
 proc onRequest(server: Server, req: Request; key: string) {.async.} =

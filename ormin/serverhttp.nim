@@ -1,6 +1,6 @@
 
 
-import asynchttpserver, asyncdispatch, json
+import asynchttpserver, asyncdispatch, asyncfile, mimetypes, os, json
 
 type
   Receivers* {.pure} = enum
@@ -16,17 +16,26 @@ proc serve*(key: string; handler: ReqHandler) =
   let httpServer = newAsyncHttpServer()
 
   proc reqhandler(req: Request) {.async.} =
-    if req.url.path == "/" & key:
-      let headers = newHttpHeaders([("Content-Type","application/json"),
-                                    ("Access-Control-Allow-Origin", "*")])
-
+    let path = req.url.path
+    if path == "/" & key:
+      let headers = newHttpHeaders([("Content-Type","application/json")])
       var receivers = Receivers.sender
       let b = req.body
       hint "Got raw data " & b
       let msgj = parseJson(b)
       let resp = handler(msgj, receivers)
-      await req.respond(Http200, $resp, headers)
+      if not resp.isNil:
+        await req.respond(Http200, $resp, headers)
     else:
-      await req.respond(Http404, "Not Found")
+      let contentType = getMimetype(newMimetypes(), splitFile(path).ext)
+      let headers = newHttpHeaders([("Content-Type", contentType)])
+
+      var file = openAsync("frontend" / path, fmReadWrite)
+      let data = await file.readAll()
+
+      await req.respond(Http200, data, headers)
+      file.close()
+    #else:
+    #  await req.respond(Http404, "Not Found")
 
   waitFor httpServer.serve(Port(8080), reqhandler)

@@ -1,5 +1,5 @@
 
-import "../ormin", json
+import "../ormin/ormin", json
 
 importModel(DbBackend.sqlite, "forum_model")
 
@@ -52,9 +52,10 @@ let something = query:
   orderby desc(ip)
   limit 1
 
-query:
+let myNewPersonId: int = query:
   insert person(?name, password = ?pw, ?email, ?salt, status = !!"'EmailUnconfirmed'",
          lastOnline = !!"DATETIME('now')")
+  returning id
 
 query:
   delete session

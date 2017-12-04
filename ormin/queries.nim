@@ -41,10 +41,11 @@ type
     qkInsert,
     qkReplace,
     qkUpdate,
-    qkDelete
+    qkDelete,
+    qkInsertReturning
   QueryBuilder = ref object
     head, fromm, join, values, where, groupby, having, orderby: string
-    limit, offset: string
+    limit, offset, returning: string
     env: Env
     kind: QueryKind
     retType: NimNode
@@ -57,6 +58,7 @@ type
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "", limit: "", offset: "",
+    returning: "",
     env: @[], kind: qkNone, params: @[],
     retType: newNimNode(nnkPar), singleRow: false,
     retTypeIsJson: false, retNames: @[],
@@ -146,6 +148,25 @@ proc escIdent(dest: var string; src: string) =
   else:
     dest.add("\"" & replace(src, "\"", "\"\"") & "\"")
 
+proc lookupColumnInEnv(n: NimNode; q: var string; params: var Params;
+                      expected: DbType, qb: QueryBuilder): DbType =
+  expectKind(n, nnkIdent)
+  let name = $n
+  block checkAliases:
+    for a in qb.colAliases:
+      if cmpIgnoreCase(a[0], name) == 0:
+        result = a[1]
+        break checkAliases
+    var alias: string
+    result = lookup("", name, qb.env, alias)
+    if result.kind == dbUnknown:
+      error "unknown column name: " & name, n
+    elif qb.kind in {qkSelect, qkJoin}:
+      doAssert alias.len >= 0
+      q.add alias
+      q.add '.'
+  escIdent(q, name)
+
 proc cond(n: NimNode; q: var string; params: var Params;
           expected: DbType, qb: QueryBuilder): DbType =
   case n.kind
@@ -155,20 +176,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       q.add "*"
       result = DbType(kind: dbUnknown)
     else:
-      block checkAliases:
-        for a in qb.colAliases:
-          if cmpIgnoreCase(a[0], name) == 0:
-            result = a[1]
-            break checkAliases
-        var alias: string
-        result = lookup("", name, qb.env, alias)
-        if result.kind == dbUnknown:
-          error "unknown column name: " & name, n
-        elif qb.kind in {qkSelect, qkJoin}:
-          doAssert alias.len >= 0
-          q.add alias
-          q.add '.'
-      escIdent(q, name)
+      result = lookupColumnInEnv(n, q, params, expected, qb)
   of nnkDotExpr:
     let t = $n[0]
     let a = $n[0]
@@ -499,7 +507,7 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         q.head.add q.env[^1][1]
         q.head.add '.'
         escIdent(q.head, a.name)
-  of qkInsert, qkReplace:
+  of qkInsert, qkInsertReturning, qkReplace:
     for a in attributes:
       # we do not set the primary key:
       if a.tabIndex == tabIndex and a.key != 1:
@@ -542,7 +550,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     q.env.add((tabindex, alias))
     for i in 1..<call.len:
       let col = call[i]
-      if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkUpdate, qkReplace}:
+      if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkInsertReturning, qkUpdate, qkReplace}:
         let colname = $col[0]
         if colname == "_":
           selectAll(q, tabIndex, col[1], col)
@@ -700,6 +708,23 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     expectLen n, 2
     let t = cond(n[1], q.offset, q.params, DbType(kind: dbInt), q)
     checkInt(t, n[1])
+  of "returning":
+    if q.kind != qkInsert:
+      error "'returning' only possible within 'insert'"
+    q.kind = qkInsertReturning
+    expectLen n, 2
+    when dbBackend == DbBackend.sqlite:
+      q.returning = ";\nselect last_insert_rowid()"
+    elif dbBackend == DbBackend.mysql:
+      q.returning = ";\nselect LAST_INSERT_ID()"
+    else:
+      q.returning = "returning "
+    var colname = ""
+    q.retType.add toNimType lookupColumnInEnv(n[1], colname, q.params, DbType(kind: dbUnknown), q)
+    q.retNames.add colname
+    q.singleRow = true
+    when dbBackend == DbBackend.postgre:
+      q.returning.add colname
   of "produce":
     expectLen n, 2
     if eqIdent(n[1], "json"):
@@ -740,6 +765,8 @@ proc queryAsString(q: QueryBuilder): string =
   if q.offset.len > 0:
     result.add "\Loffset "
     result.add q.offset
+  if q.returning.len > 0:
+    result.add q.returning
   when defined(debugOrminSql):
     echo "\n", result
 
@@ -834,7 +861,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       add res, it
     stopQuery(db, prepStmt)
 
-  let returnsData = q.kind in {qkSelect, qkJoin}
+  let returnsData = q.kind in {qkSelect, qkJoin, qkInsertReturning}
   if not q.singleRow and q.retType.len > 0:
     blk.add getAst(whileStmt(prepStmt, res, it, body))
   else:

@@ -1,0 +1,27 @@
+sudo: false
+language: c
+os: linux
+install:
+  - git clone https://github.com/nim-lang/nim
+  - cd nim
+  - git clone --depth 1 https://github.com/nim-lang/csources.git
+  - cd csources
+  - sh build.sh
+  - cd ../
+  - bin/nim c koch
+  - ./koch boot -d:release
+  - ./koch tools
+  - cd ..
+before_script:
+  - set -e
+  - export PATH=$(pwd)/nim/bin:$(pwd):$PATH
+script:
+  - nimble develop
+  - nim c tools/ormin_importer
+  - cd examples/forum
+  - ../../tools/ormin_importer forum_model.sql
+  - nim c forum.nim
+  - nim c forumproto.nim
+  - cd examples/chat
+  - ../../tools/ormin_importer chat_model.sql
+  - nim c server.nim

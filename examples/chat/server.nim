@@ -69,13 +69,10 @@ protocol "chatclient.nim":
       select users(id, password)
       where name == %arg["name"]
     if candidates.len == 0:
-      query:
-        insert users(name = %arg["name"], password = %arg["password"])
       let userId = query:
         produce nim
-        select users(id)
-        where name == %arg["name"] and password == %arg["password"]
-        limit 1
+        insert users(name = %arg["name"], password = %arg["password"])
+        returning id
       send(%userId)
     else:
       block search:

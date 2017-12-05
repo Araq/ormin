@@ -19,7 +19,7 @@ proc loginField(desc, field, class: kstring;
   result = buildHtml(tdiv):
     label(`for` = field):
       text desc
-    input(class = class, id = field, onchange = validator(field))
+    input(`type` = class, id = field, onchange = validator(field))
 
 # here we setup the connection to the server:
 let conn = newWebSocket("ws://localhost:8080", "orminchat")

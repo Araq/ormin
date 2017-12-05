@@ -16,7 +16,7 @@ before_script:
   - set -e
   - export PATH=$(pwd)/nim/bin:$(pwd):$PATH
 script:
-  - nimble develop
+  - nimble develop -y
   - nim c tools/ormin_importer
   - cd examples/forum
   - ../../tools/ormin_importer forum_model.sql

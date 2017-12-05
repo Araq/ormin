@@ -11,3 +11,5 @@ requires "nim >= 0.17.2"
 requires "websocket >= 0.2.2"
 
 bin = @["tools/ormin_importer"]
+
+skipDirs = @["examples"]

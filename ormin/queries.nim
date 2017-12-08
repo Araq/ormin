@@ -720,9 +720,11 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     else:
       q.returning = "returning "
     var colname = ""
-    q.retType.add toNimType lookupColumnInEnv(n[1], colname, q.params, DbType(kind: dbUnknown), q)
-    q.retNames.add colname
+    let nimType = toNimType lookupColumnInEnv(n[1], colname, q.params, DbType(kind: dbUnknown), q)
     q.singleRow = true
+    when dbBackend != DbBackend.sqlite:
+      q.retType.add nimType
+      q.retNames.add colname
     when dbBackend == DbBackend.postgre:
       q.returning.add colname
   of "produce":
@@ -765,8 +767,9 @@ proc queryAsString(q: QueryBuilder): string =
   if q.offset.len > 0:
     result.add "\Loffset "
     result.add q.offset
-  if q.returning.len > 0:
-    result.add q.returning
+  when dbBackend != DbBackend.sqlite:
+    if q.returning.len > 0:
+      result.add q.returning
   when defined(debugOrminSql):
     echo "\n", result
 
@@ -861,9 +864,21 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       add res, it
     stopQuery(db, prepStmt)
 
+  template insertQueryReturningId(prepStmt) {.dirty.} =
+    var insertedId = -1
+    if stepQuery(db, prepStmt, 0):
+      insertedId = getLastId(db, prepStmt)
+      stopQuery(db, prepStmt)
+    else:
+      stopQuery(db, prepStmt)
+      dbError(db)
+    insertedId
+
   let returnsData = q.kind in {qkSelect, qkJoin, qkInsertReturning}
   if not q.singleRow and q.retType.len > 0:
     blk.add getAst(whileStmt(prepStmt, res, it, body))
+  elif q.returning.len > 0 and dbBackend == DbBackend.sqlite:
+    blk.add getAst(insertQueryReturningId(prepStmt))
   else:
     if attempt:
       blk.add getAst(ifStmt1(prepStmt, returnsData, body))

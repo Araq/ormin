@@ -725,6 +725,8 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     when dbBackend != DbBackend.sqlite:
       q.retType.add nimType
       q.retNames.add colname
+    else:
+      discard nimType
     when dbBackend == DbBackend.postgre:
       q.returning.add colname
   of "produce":

@@ -1,11 +1,11 @@
 
-import "../ormin/ormin", json
+import "../ormin/ormin", "../../ormin/serverws", json
 
 importModel(DbBackend.sqlite, "forum_model")
 
 var db {.global.} = open("stuff", "", "", "")
 
-protocol "examples/forumclient.nim":
+protocol "forumclient.nim":
   common:
     when defined(js):
       type kstring = cstring

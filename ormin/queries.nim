@@ -976,7 +976,9 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
       castDest = n[1]
     else:
       expectLen n, 1
-      castDest = makeSeq(b.retType, b.singleRow)
+      # this can happen for the new 'returning' support:
+      let retType = if b.retType.len != 0 or b.retType.kind != nnkPar: b.retType else: ident"int"
+      castDest = makeSeq(retType, b.singleRow)
     return newTree(nnkCast, castDest, ident"data")
   elif n.kind == nnkTypeSection:
     b.foundObj = false

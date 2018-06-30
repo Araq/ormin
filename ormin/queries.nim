@@ -561,7 +561,6 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           else:
             if q.coln > 0: q.head.add ", "
             escIdent(q.head, colname)
-            #q.params.add newIdentDefs(col[1], toNimType(coltype))
             inc q.coln
           if q.kind == qkUpdate:
             q.head.add " = "
@@ -881,6 +880,9 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     blk.add getAst(whileStmt(prepStmt, res, it, body))
   elif q.returning.len > 0 and dbBackend == DbBackend.sqlite:
     blk.add getAst(insertQueryReturningId(prepStmt))
+  elif (q.kind == qkInsert or q.kind == qkUpdate) and dbBackend == DbBackend.postgre:
+    # insert does not returns data in pg
+    blk.add getAst(ifStmt1(prepStmt, returnsData, body))
   else:
     if attempt:
       blk.add getAst(ifStmt1(prepStmt, returnsData, body))

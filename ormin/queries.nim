@@ -532,7 +532,6 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
 
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
-    q.fromm = "" # dirty hack to make it work with nim new version.
     let call = n
     let tab = $call[0]
     let tabIndex = tableNames.find(tab)

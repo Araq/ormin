@@ -95,12 +95,21 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
                      t: typedesc; name: string) =
   dest = isTrue(pqgetvalue(queryResult, queryI, idx.cint))
 
-proc fillString(dest: var string; src: cstring; srcLen: int) =
-  if dest.isNil: dest = newString(srcLen)
-  else: setLen(dest, srcLen)
-  copyMem(unsafeAddr(dest[0]), src, srcLen)
-  dest[srcLen] = '\0'
+# proc fillString(dest: var string; src: cstring; srcLen: int) =
+#   if dest.isNil: dest = newString(srcLen)
+#   else: setLen(dest, srcLen)
+#   copyMem(unsafeAddr(dest[0]), src, srcLen)
+#   dest[srcLen] = '\0'
 
+proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
+  var
+    c = src[0]
+    i = 0
+  while c != '\0':
+    dest.add($c)
+    i = i + 1
+    c = src[i]
+  
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
   let src = pqgetvalue(queryResult, queryI, idx.cint)

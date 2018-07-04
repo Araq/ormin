@@ -6,7 +6,7 @@ export db_common
 
 type
   DbConn* = PPGconn    ## encapsulates a database connection
-  PStmt = cstring ## a identifier for the prepared queries
+  PStmt = string ## a identifier for the prepared queries
 
   varchar* = string
   integer* = int
@@ -33,7 +33,7 @@ template genId*: untyped =
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
   var name = "ormin" & $genId
-  result = cstring(name)
+  result = name
   var res = pqprepare(db, result, q, 0, nil)
   if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 

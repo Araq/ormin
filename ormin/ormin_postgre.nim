@@ -6,7 +6,7 @@ export db_common
 
 type
   DbConn* = PPGconn    ## encapsulates a database connection
-  PStmt = cstring ## a identifier for the prepared queries
+  PStmt = string ## a identifier for the prepared queries
 
   varchar* = string
   integer* = int
@@ -25,13 +25,15 @@ proc c_strtod(buf: cstring, endptr: ptr cstring = nil): float64 {.
 proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
   importc: "strtol", header: "<stdlib.h>", noSideEffect.}
 
-var sid {.compileTime.}: int
+var sid = 0
+
+template genSid*: untyped =
+  inc(sid)
+  sid
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
-  static:
-    inc sid
-    const name = "ormin" & $sid
-  result = cstring(name)
+  var name = "ormin" & $genSid
+  result = name
   var res = pqprepare(db, result, q, 0, nil)
   if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 
@@ -93,11 +95,14 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
                      t: typedesc; name: string) =
   dest = isTrue(pqgetvalue(queryResult, queryI, idx.cint))
 
-proc fillString(dest: var string; src: cstring; srcLen: int) =
-  if dest.isNil: dest = newString(srcLen)
-  else: setLen(dest, srcLen)
-  copyMem(unsafeAddr(dest[0]), src, srcLen)
-  dest[srcLen] = '\0'
+proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
+  var
+    c = src[0]
+    i = 0
+  while c != '\0':
+    dest.add($c)
+    i = i + 1
+    c = src[i]
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
@@ -141,7 +146,9 @@ template startQuery*(db: DbConn; s: PStmt) =
   else:
     var queryResult {.inject.} = pqexecPrepared(db, s, int32(0),
             nil, nil, nil, 0)
-  if pqResultStatus(queryResult) != PGRES_TUPLES_OK: dbError(db)
+  if pqResultStatus(queryResult) == PGRES_COMMAND_OK:
+    discard # insert does not returns data in pg
+  elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: dbError(db)
   var queryI {.inject.} = cint(-1)
   var queryLen {.inject.} = pqntuples(queryResult)
 

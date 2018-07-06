@@ -25,17 +25,15 @@ proc c_strtod(buf: cstring, endptr: ptr cstring = nil): float64 {.
 proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
   importc: "strtol", header: "<stdlib.h>", noSideEffect.}
 
-var sid = 0
-
-template genSid*: untyped =
-  inc(sid)
-  sid
+var sid {.compileTime.}: int
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
-  var name = "ormin" & $genSid
-  result = name
+  static:
+    inc sid
+    const name = "ormin" & $sid
+  result = cstring(name)
   var res = pqprepare(db, result, q, 0, nil)
-  if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
+if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive
@@ -96,14 +94,11 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
   dest = isTrue(pqgetvalue(queryResult, queryI, idx.cint))
 
 proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
-  var
-    c = src[0]
-    i = 0
-  while c != '\0':
-    dest.add($c)
-    i = i + 1
-    c = src[i]
-
+  var i = 0
+  while src[i] != '\0':
+    dest.add src[i]
+    inc i
+    
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
   let src = pqgetvalue(queryResult, queryI, idx.cint)

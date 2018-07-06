@@ -6,7 +6,7 @@ export db_common
 
 type
   DbConn* = PPGconn    ## encapsulates a database connection
-  PStmt = cstring ## a identifier for the prepared queries
+  PStmt = string ## a identifier for the prepared queries
 
   varchar* = string
   integer* = int
@@ -33,7 +33,7 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
     const name = "ormin" & $sid
   result = cstring(name)
   var res = pqprepare(db, result, q, 0, nil)
-  if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
+if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive
@@ -93,12 +93,12 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
                      t: typedesc; name: string) =
   dest = isTrue(pqgetvalue(queryResult, queryI, idx.cint))
 
-proc fillString(dest: var string; src: cstring; srcLen: int) =
-  if dest.isNil: dest = newString(srcLen)
-  else: setLen(dest, srcLen)
-  copyMem(unsafeAddr(dest[0]), src, srcLen)
-  dest[srcLen] = '\0'
-
+proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
+  var i = 0
+  while src[i] != '\0':
+    dest.add src[i]
+    inc i
+    
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
   let src = pqgetvalue(queryResult, queryI, idx.cint)
@@ -141,7 +141,9 @@ template startQuery*(db: DbConn; s: PStmt) =
   else:
     var queryResult {.inject.} = pqexecPrepared(db, s, int32(0),
             nil, nil, nil, 0)
-  if pqResultStatus(queryResult) != PGRES_TUPLES_OK: dbError(db)
+  if pqResultStatus(queryResult) == PGRES_COMMAND_OK:
+    discard # insert does not returns data in pg
+  elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: dbError(db)
   var queryI {.inject.} = cint(-1)
   var queryLen {.inject.} = pqntuples(queryResult)
 

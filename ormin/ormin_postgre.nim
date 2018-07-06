@@ -25,16 +25,18 @@ proc c_strtod(buf: cstring, endptr: ptr cstring = nil): float64 {.
 proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
   importc: "strtol", header: "<stdlib.h>", noSideEffect.}
 
-var sid {.compileTime.}: int
+var sid = 0
+
+template genSId*: untyped =
+  inc(sid)
+  sid
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
-  static:
-    inc sid
-    const name = "ormin" & $sid
-  result = cstring(name)
+  var name = "ormin" & $genSId
+  result = name
   var res = pqprepare(db, result, q, 0, nil)
-if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
-
+  if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
+  
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive
   # for the duration of the query. This is safer than relying

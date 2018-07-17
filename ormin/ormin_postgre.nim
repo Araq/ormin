@@ -145,6 +145,7 @@ template startQuery*(db: DbConn; s: PStmt) =
             nil, nil, nil, 0)
   if pqResultStatus(queryResult) == PGRES_COMMAND_OK:
     discard # insert does not returns data in pg
+  elif pqResultStatus(queryResult) == PGRES_FATAL_ERROR: dbError(db)
   elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: dbError(db)
   var queryI {.inject.} = cint(-1)
   var queryLen {.inject.} = pqntuples(queryResult)

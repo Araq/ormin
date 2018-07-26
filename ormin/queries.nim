@@ -881,9 +881,11 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     blk.add getAst(whileStmt(prepStmt, res, it, body))
   elif q.returning.len > 0 and dbBackend == DbBackend.sqlite:
     blk.add getAst(insertQueryReturningId(prepStmt))
-  elif (q.kind == qkInsert or q.kind == qkUpdate or
-        q.kind == qkDelete) and dbBackend == DbBackend.postgre:
-    blk.add getAst(ifStmt1(prepStmt, returnsData, body))
+  elif (q.kind == qkInsert or q.kind == qkUpdate) and dbBackend == DbBackend.postgre:
+    blk.add getAst(ifStmt1(prepStmt, true, body))
+  elif (q.kind == qkDelete) and dbBackend == DbBackend.postgre:
+    blk.add getAst(ifStmt1(prepStmt, true, body))
+    blk.add newCall(bindSym"getAffectedRows", ident"db", prepStmt)
   else:
     if attempt:
       blk.add getAst(ifStmt1(prepStmt, returnsData, body))

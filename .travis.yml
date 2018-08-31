@@ -22,6 +22,7 @@ script:
   - ../../tools/ormin_importer forum_model.sql
   - nim c forum.nim
   - nim c forumproto.nim
+  - cd ../..
   - cd examples/chat
   - ../../tools/ormin_importer chat_model.sql
   - nim c server.nim

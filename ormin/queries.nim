@@ -1009,19 +1009,25 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
     if x.kind != nnkNone: result.add x
 
 proc transformServer(n: NimNode; b: ProtoBuilder): NimNode =
-  template sendImpl(x, msgkind, broadcast): untyped {.dirty.} =
-    when broadcast:
-      receivers = Receivers.all
+  template sendImpl(x, msgkind): untyped {.dirty.} =
+    result = newJObject()
+    result["cmd"] = %msgkind
+    result["data"] = x
+
+  template broadCastImpl(x, msgkind): untyped {.dirty.} =
+    receivers = Receivers.all
     result = newJObject()
     result["cmd"] = %msgkind
     result["data"] = x
 
   if n.kind in nnkCallKinds and n[0].kind == nnkIdent:
     case $n[0]
-    of "send", "broadcast":
-      let broad = $n[0] == "broadcast"
+    of "send":
       expectLen n, 2
-      return getAst(sendImpl(n[1], b.msgId+1, broad))
+      return getAst(sendImpl(n[1], b.msgId+1))
+    of "broadcast":
+      expectLen n, 2
+      return getAst(broadCastImpl(n[1], b.msgId+1))
     of "query":
       expectLen n, 2
       var qb = newQueryBuilder()
@@ -1084,13 +1090,13 @@ macro protocol*(name: static[string]; body: untyped): untyped =
   template serverProc(body) {.dirty.} =
     proc dispatch(inp: JsonNode; receivers: var Receivers): JsonNode =
       let arg = inp["arg"]
-      let cmd = inp["cmd"].getNum()
+      let cmd = inp["cmd"].getInt()
       body
 
   template clientProc(body) {.dirty.} =
     proc recvMsg*(inp: JsonNode) =
       let data = inp["data"]
-      let cmd = inp["cmd"].getNum()
+      let cmd = inp["cmd"].getInt()
       body
 
   var b = ProtoBuilder(msgId: 0, dispClient: newTree(nnkCaseStmt, ident"cmd"),

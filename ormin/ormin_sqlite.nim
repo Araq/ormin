@@ -76,13 +76,13 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64;
   dest = column_int64(s, idx.cint)
 
 proc fillString(dest: var string; src: cstring; srcLen: int) =
+  if srcLen == 0: return
   when defined(nimNoNilSeqs):
     setLen(dest, srcLen)
   else:
     if dest.isNil: dest = newString(srcLen)
     else: setLen(dest, srcLen)
   copyMem(unsafeAddr(dest[0]), src, srcLen)
-  dest[srcLen] = '\0'
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =

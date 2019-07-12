@@ -60,7 +60,7 @@ proc newQueryBuilder(): QueryBuilder {.compileTime.} =
     groupby: "", having: "", orderby: "", limit: "", offset: "",
     returning: "",
     env: @[], kind: qkNone, params: @[],
-    retType: newNimNode(nnkPar), singleRow: false,
+    retType: newNimNode(nnkTupleTy), singleRow: false,
     retTypeIsJson: false, retNames: @[],
     coln: 0, qmark: 0, aliasGen: 1, colAliases: @[])
 
@@ -177,6 +177,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = DbType(kind: dbUnknown)
     else:
       result = lookupColumnInEnv(n, q, params, expected, qb)
+    #result.name = name
   of nnkDotExpr:
     let t = $n[0]
     let a = $n[0]
@@ -436,13 +437,13 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   if k != nnkIteratorDef:
     yld.add newVarStmt(ident"res", newCall(bindSym"createJObject"))
   let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
-  if q.retType.len > 1:
+  if q.retType.len > 0:
     var i = 0
     for r in q.retType:
       template resAt(i) {.dirty.} = res[i]
       let resx = if q.retTypeIsJson: ident"res" else: getAst(resAt(newLit(i)))
       yld.add newCall(fn, ident"db", prepStmt, newLit(i),
-                      resx, copyNimTree r, newLit q.retNames[i])
+                      resx, copyNimTree r[1], newLit q.retNames[i])
       inc i
   else:
     yld.add newCall(fn, ident"db", prepStmt, newLit(0), ident"res",
@@ -550,6 +551,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     q.env.add((tabindex, alias))
     for i in 1..<call.len:
       let col = call[i]
+      echo col.treeRepr
       if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkInsertReturning, qkUpdate, qkReplace}:
         let colname = $col[0]
         if colname == "_":
@@ -587,12 +589,13 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           if q.values.len > 0: q.values.add ", "
           q.values.add placeholder(q)
       elif col.kind == nnkIdent and $col == "_":
+        echo $col
         selectAll(q, tabIndex, ident"arg", col)
       elif q.kind in {qkSelect, qkJoin}:
         if q.coln > 0: q.head.add ", "
         inc q.coln
         let t = cond(col, q.head, q.params, DbType(kind: dbUnknown), q)
-        q.retType.add toNimType(t)
+        q.retType.add nnkIdentDefs.newTree(newIdentNode(getColumnName(col)), toNimType(t), newEmptyNode())
         q.retNames.add getColumnName(col)
       else:
         error "unknown selector: " & repr(n), n
@@ -832,18 +835,20 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       body.add newTree(nnkVarSection, newIdentDefs(it, q.retType))
 
   let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
-  if q.retType.len > 1:
+  if q.retType.len > 0:
     var i = 0
     for r in q.retType:
       template resAt(x, i) {.dirty.} = x[i]
       let resx = if q.retTypeIsJson: it else: getAst(resAt(it, newLit(i)))
 
       body.add newCall(fn, ident"db", prepStmt, newLit(i),
-                       resx, r, newLit retName(q, i, body))
+                       resx, r[1], newLit retName(q, i, body))
       inc i
-  elif q.retType.len > 0:
-    body.add newCall(fn, ident"db", prepStmt, newLit(0),
-                     it, q.retType, newLit retName(q, 0, body))
+  #elif q.retType.len > 0:
+  #  template resAt(x, i) {.dirty.} = x[i]
+  #  let resx = if q.retTypeIsJson: it else: getAst(resAt(it, newLit(0)))
+  #  body.add newCall(fn, ident"db", prepStmt, newLit(0),
+  #                   resx, q.retType[0][1], newLit retName(q, 0, body))
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 
@@ -955,7 +960,7 @@ proc addFields(n: NimNode; b: ProtoBuilder): NimNode =
     doAssert b.retType.len == b.retNames.len, "ormin: types and column names do not match"
     for i in 0 ..< b.retType.len:
       x.add newTree(nnkIdentDefs, newTree(nnkPostfix, ident"*", ident(b.retNames[i])),
-                    b.retType[i], newEmptyNode())
+                    b.retType[i][1], newEmptyNode())
     return n
   result = copyNimNode(n)
   for i in 0 ..< n.len:
@@ -979,7 +984,7 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
     else:
       expectLen n, 1
       # this can happen for the new 'returning' support:
-      let retType = if b.retType.len != 0 or b.retType.kind != nnkPar: b.retType else: ident"int"
+      let retType = if b.retType.len != 0 or b.retType.kind != nnkTupleTy: b.retType else: ident"int"
       castDest = makeSeq(retType, b.singleRow)
     return newTree(nnkCast, castDest, ident"data")
   elif n.kind == nnkTypeSection:

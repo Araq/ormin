@@ -1,7 +1,5 @@
-#import ormin / [serverws]
-#import ormin
-import "../../ormin/serverws"
-import "../../ormin"
+import ormin / [serverws]
+import ormin
 
 import json
 

@@ -502,7 +502,8 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         if q.coln > 0: q.head.add ", "
         inc q.coln
         let t = a.typ
-        q.retType.add toNimType(t)
+        #q.retType.add toNimType(t)
+        q.retType.add nnkIdentDefs.newTree(newIdentNode(a.name), toNimType(t), newEmptyNode())
         q.retNames.add a.name
         doAssert q.env.len > 0
         q.head.add q.env[^1][1]
@@ -551,7 +552,6 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     q.env.add((tabindex, alias))
     for i in 1..<call.len:
       let col = call[i]
-      echo col.treeRepr
       if col.kind == nnkExprEqExpr and q.kind in {qkInsert, qkInsertReturning, qkUpdate, qkReplace}:
         let colname = $col[0]
         if colname == "_":
@@ -589,7 +589,6 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           if q.values.len > 0: q.values.add ", "
           q.values.add placeholder(q)
       elif col.kind == nnkIdent and $col == "_":
-        echo $col
         selectAll(q, tabIndex, ident"arg", col)
       elif q.kind in {qkSelect, qkJoin}:
         if q.coln > 0: q.head.add ", "
@@ -842,7 +841,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       let resx = if q.retTypeIsJson: it else: getAst(resAt(it, newLit(i)))
 
       body.add newCall(fn, ident"db", prepStmt, newLit(i),
-                       resx, r[1], newLit retName(q, i, body))
+                       resx, (if r.len > 0: r[1] else: r), newLit retName(q, i, body))
       inc i
   #elif q.retType.len > 0:
   #  template resAt(x, i) {.dirty.} = x[i]

@@ -177,7 +177,6 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = DbType(kind: dbUnknown)
     else:
       result = lookupColumnInEnv(n, q, params, expected, qb)
-    #result.name = name
   of nnkDotExpr:
     let t = $n[0]
     let a = $n[0]
@@ -502,7 +501,6 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         if q.coln > 0: q.head.add ", "
         inc q.coln
         let t = a.typ
-        #q.retType.add toNimType(t)
         q.retType.add nnkIdentDefs.newTree(newIdentNode(a.name), toNimType(t), newEmptyNode())
         q.retNames.add a.name
         doAssert q.env.len > 0
@@ -843,11 +841,6 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       body.add newCall(fn, ident"db", prepStmt, newLit(i),
                        resx, (if r.len > 0: r[1] else: r), newLit retName(q, i, body))
       inc i
-  #elif q.retType.len > 0:
-  #  template resAt(x, i) {.dirty.} = x[i]
-  #  let resx = if q.retTypeIsJson: it else: getAst(resAt(it, newLit(0)))
-  #  body.add newCall(fn, ident"db", prepStmt, newLit(0),
-  #                   resx, q.retType[0][1], newLit retName(q, 0, body))
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 

@@ -417,8 +417,14 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
       body.add newAssignment(ident"result", newCall(bindSym"createJArray"))
     finalParams.add ident"JsonNode"
   else:
-    body.add newTree(nnkVarSection, newIdentDefs(ident"res", q.retType))
-    finalParams.add q.retType
+    var rtyp = if q.retType.len > 1:
+      q.retType
+    else:
+      q.retType[0][1]
+    body.add newTree(nnkVarSection, newIdentDefs(ident"res", rtyp))
+    if k != nnkIteratorDef:
+      rtyp = nnkBracketExpr.newTree(ident"seq", rtyp)
+    finalParams.add rtyp
   finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
   if q.params.len > 0:
@@ -434,9 +440,10 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   body.add newCall(bindSym"startQuery", ident"db", prepStmt)
   let yld = newStmtList()
   if k != nnkIteratorDef:
-    yld.add newVarStmt(ident"res", newCall(bindSym"createJObject"))
+    if q.retTypeIsJson:
+      yld.add newVarStmt(ident"res", newCall(bindSym"createJObject"))
   let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
-  if q.retType.len > 0:
+  if q.retType.len > 1:
     var i = 0
     for r in q.retType:
       template resAt(i) {.dirty.} = res[i]
@@ -446,7 +453,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
       inc i
   else:
     yld.add newCall(fn, ident"db", prepStmt, newLit(0), ident"res",
-                    copyNimTree q.retType, newLit q.retNames[0])
+                    copyNimTree q.retType[0][1], newLit q.retNames[0])
   if k == nnkIteratorDef:
     yld.add newTree(nnkYieldStmt, ident"res")
   else:

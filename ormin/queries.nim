@@ -808,18 +808,22 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   result = newTree(if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
     newGlobalVar(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
+  let rtyp = if q.retType.len > 1 or q.retType.len == 0:
+    q.retType
+  else:
+    q.retType[0][1]
   if q.retType.len > 0:
     if q.singleRow:
       if q.retTypeIsJson:
         result.add newVarStmt(res, newCall(bindSym"createJObject"))
       else:
-        result.add newTree(nnkVarSection, newIdentDefs(res, q.retType))
+        result.add newTree(nnkVarSection, newIdentDefs(res, rtyp))
     else:
       if q.retTypeIsJson:
         result.add newVarStmt(res, newCall(bindSym"createJArray"))
       else:
         result.add newTree(nnkVarSection, newIdentDefs(res,
-          newTree(nnkBracketExpr, bindSym"seq", q.retType),
+          newTree(nnkBracketExpr, bindSym"seq", rtyp),
           newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
   let blk = newStmtList()
   var i = 1
@@ -836,10 +840,10 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     if q.retTypeIsJson:
       body.add newVarStmt(it, newCall(bindSym"createJObject"))
     else:
-      body.add newTree(nnkVarSection, newIdentDefs(it, q.retType))
+      body.add newTree(nnkVarSection, newIdentDefs(it, rtyp))
 
   let fn = if q.retTypeIsJson: bindSym"bindResultJson" else: bindSym"bindResult"
-  if q.retType.len > 0:
+  if q.retType.len > 1:
     var i = 0
     for r in q.retType:
       template resAt(x, i) {.dirty.} = x[i]
@@ -848,6 +852,9 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       body.add newCall(fn, ident"db", prepStmt, newLit(i),
                        resx, (if r.len > 0: r[1] else: r), newLit retName(q, i, body))
       inc i
+  elif q.retType.len > 0:
+    body.add newCall(fn, ident"db", prepStmt, newLit(0),
+                     it, rtyp, newLit retName(q, 0, body))
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 

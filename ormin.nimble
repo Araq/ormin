@@ -13,3 +13,4 @@ requires "websocket >= 0.2.2"
 bin = @["tools/ormin_importer"]
 
 skipDirs = @["examples"]
+installExt = @["nim"]

@@ -57,7 +57,7 @@ proc updateClients(server: Server) {.async.} =
           if c.connected:
             # do not send a broadcast message to the one which sent it:
             if server.receivers != Receivers.allExceptSender or c.id != m[1]:
-              await c.socket.sendText(m[0], false)
+              await c.socket.sendText(m[0]) #, false)
           else:
             someDead = true
       if someDead:
@@ -91,14 +91,14 @@ proc processMessage(server: Server, client: Client, data: string) {.async.} =
     let resp = server.handler(msgj, server.receivers)
     if not resp.isNil:
       if server.receivers == sender:
-        await client.socket.sendText($resp, false)
+        await client.socket.sendText($resp) #, false)
       else:
         server.msgs.add(($resp, client.id))
         server.needsUpdate = true
 
 proc processClient(server: Server, client: Client) {.async.} =
   while client.connected:
-    var frameFut = client.socket.readData(false)
+    var frameFut = client.socket.readData()
     yield frameFut
     if frameFut.failed:
       error("Error occurred handling client messages.\n" &
@@ -117,8 +117,8 @@ proc processClient(server: Server, client: Client) {.async.} =
   client.socket.close()
 
 proc onRequest(server: Server, req: Request; key: string) {.async.} =
-  let (success, error) = await verifyWebsocketRequest(req, key)
-  if success:
+  let (ws, error) = await verifyWebsocketRequest(req, key)
+  if ws != nil:
     hint("Client connected from " & req.hostname)
     server.clients.add(newClient(server, req.client, req.hostname))
     asyncCheck processClient(server, server.clients[^1])

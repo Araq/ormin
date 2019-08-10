@@ -76,10 +76,13 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64;
   dest = column_int64(s, idx.cint)
 
 proc fillString(dest: var string; src: cstring; srcLen: int) =
-  if dest.isNil: dest = newString(srcLen)
-  else: setLen(dest, srcLen)
+  if srcLen == 0: return
+  when defined(nimNoNilSeqs):
+    setLen(dest, srcLen)
+  else:
+    if dest.isNil: dest = newString(srcLen)
+    else: setLen(dest, srcLen)
   copyMem(unsafeAddr(dest[0]), src, srcLen)
-  dest[srcLen] = '\0'
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
@@ -106,7 +109,7 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     when t is string:
-      let dest = newJString(nil)
+      let dest = newJString("")
       let srcLen = column_bytes(s, idx.cint)
       let src = column_text(s, idx.cint)
       fillString(dest.str, src, srcLen)

@@ -148,11 +148,65 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
         inc i
   result = 0
 
+
+const pgAliases = [("double precision", "float8"),
+                   ("character varying", "varchar"),
+                   ("timestamp with time zone", "timestamptz"),
+                   ("timestamp without time zone", "timestamp")]
+
+
+proc replaceType(line: string): string =
+  result = line
+  for alias in pgAliases:
+    if line.contains alias[0]:
+      result = result.replace(alias[0], alias[1])
+  
+
+proc parsePgFile(strm: FileStream, infile: string): SqlNode =
+  # generate a new schma only with SELECT, CREATE, UPDATE or DELETE
+  let schemaNme = "public"
+  var stream = newStringStream()
+  var line = ""
+  if not isNil(strm):
+    var started: bool = false
+    while strm.readLine(line):
+      line = replaceType(line)
+      if line.find("DEFAULT") > 0:
+        line = line.substr(0, line.find("DEFAULT") - 1) & ","
+      if line.startsWith("--"): discard
+      elif line.startsWith("CREATE TABLE"):
+        if not line.contains(";"):
+          started = true
+        # nim 's parseSql does not support postgres schema name
+        line = line.replace(schemaNme & ".")
+        echo line
+        stream.write line
+      elif started and line.contains(";"): # end of sentence
+        echo line
+        stream.write line
+        started = false
+        echo "\n"
+      elif started:
+        echo line
+        stream.write line
+    
+  stream.setPosition(0)
+  result = parseSql(stream, infile)
+  strm.close()
+
+  
 proc generateCode(infile, outfile: string; target: Target) =
+  
   let stream = newFileStream(infile, fmRead)
   if stream.isNil:
     quit "fatal: cannot open " & infile
-  let sql = parseSql(stream, infile)
+
+  var sql: SqlNode
+  if target == Target.postgre:
+    sql = parsePgFile(stream, infile)
+  else:
+    sql = parseSql(stream, infile)
+  
   var knownTables = initOrderedTable[string, DbColumns]()
   collectTables(sql, knownTables)
   var f: File

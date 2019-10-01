@@ -11,6 +11,7 @@ type
   varchar* = string
   integer* = int
   timestamp* = string
+  uuid* = string
 
 proc dbError*(db: DbConn) {.noreturn.} =
   ## raises a DbError exception.

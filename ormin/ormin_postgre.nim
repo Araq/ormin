@@ -28,12 +28,10 @@ proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
 var sid {.compileTime.}: int
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
-  static:
-    inc sid
-    const name = "ormin" & $sid
-  result = cstring(name)
+  inc sid
+  result = "ormin" & $sid
   var res = pqprepare(db, result, q, 0, nil)
-if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
+  if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
 
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive

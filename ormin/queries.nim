@@ -14,13 +14,13 @@ const
   nequals = "<>"
 
 type
-  Function = object
+  Function* = object
     name: string
     arity: int # -1 for 'varargs'
     typ: DbTypeKind # if dbUnknown, use type of the last argument
 
-const
-  functions = [
+var
+  functions {.compileTime.} = @[
     Function(name: "count", arity: 1, typ: dbInt),
     Function(name: "coalesce", arity: -1, typ: dbUnknown),
     Function(name: "min", arity: 1, typ: dbUnknown),

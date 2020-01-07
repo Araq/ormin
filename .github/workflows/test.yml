@@ -20,8 +20,8 @@ jobs:
         path: ~/.nimble
         key: ${{ runner.os }}-nimble-stable
     - uses: jiro4989/setup-nim-action@v1.0.1
-      with:
-        nim-version: 'stable'
+#       with:
+#         nim-version: 'stable'
     - name: Run test
       run: nimble build -Y
     - name: Get version

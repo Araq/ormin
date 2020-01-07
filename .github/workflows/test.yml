@@ -24,3 +24,5 @@ jobs:
         nim-version: 'stable'
     - name: Run test
       run: nimble build -Y
+    - name: Get version
+      run: nim -V

@@ -27,15 +27,15 @@ jobs:
 #       with:
 #         nim-version: 'stable'
 
+    - name: Install Sqlite
+      run: apt-get install sqlite3
+    
+    - name: Test sqlite
+      run: sqlite3 -version
+
     - uses: harmon758/postgresql-action@v1
       with: 
         postgresql version: '11'
       
     - name: Run test
       run: nimble build -Y
-      
-    - name: docker-compose
-      run: docker-compose -V
-    
-    - name: docker run
-      run: docker -V

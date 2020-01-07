@@ -36,3 +36,6 @@ jobs:
       
     - name: Get version
       run: nim -V
+
+    - name: psql
+      run: psql -V

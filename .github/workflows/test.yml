@@ -33,6 +33,7 @@ jobs:
     - uses: harmon758/postgresql-action@v1
       with: 
         postgresql version: '11'
+        postgresql password: 'postgres'
       
     - name: Run test
       run: nimble test

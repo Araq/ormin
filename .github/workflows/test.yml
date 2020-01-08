@@ -27,11 +27,8 @@ jobs:
 #       with:
 #         nim-version: 'stable'
 
-    - name: Install Sqlite
-      run: sudo apt-get install sqlite3
-    
-    - name: Test sqlite
-      run: sqlite3 -version
+    # - name: Install Sqlite
+    #   run: sudo apt-get install sqlite3
 
     - uses: harmon758/postgresql-action@v1
       with: 

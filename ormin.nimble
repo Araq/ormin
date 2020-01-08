@@ -15,5 +15,8 @@ bin = @["tools/ormin_importer"]
 skipDirs = @["examples"]
 installExt = @["nim"]
 
-task create_postgres, "create_postgres":
-  exec "nim c -r tests/create_postgres.nim"
+task test, "Run nimble test":
+  exec "nim c -r tests/tpostgres.nim"
+
+before test:
+  exec "nim c -r tests/create_postgres"

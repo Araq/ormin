@@ -34,8 +34,5 @@ jobs:
         postgresql password: 'test'
         postgresql db: 'test'
       
-    - name: Create postgres table
-      run: nimble create_postgres
-      
     - name: Run test
       run: nimble test

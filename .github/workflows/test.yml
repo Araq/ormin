@@ -38,4 +38,4 @@ jobs:
         postgresql version: '11'
       
     - name: Run test
-      run: nimble build -Y
+      run: nimble test

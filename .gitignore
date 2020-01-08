@@ -1,5 +1,4 @@
 tools/ormin_importer
-tests/model_postgres.nim
 tests/create_postgres
 tests/tpostgres
 tests/tsqlite

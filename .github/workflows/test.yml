@@ -28,7 +28,7 @@ jobs:
 #         nim-version: 'stable'
 
     - name: Install Sqlite
-      run: apt-get install sqlite3
+      run: sudo apt-get install sqlite3
     
     - name: Test sqlite
       run: sqlite3 -version

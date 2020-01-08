@@ -35,4 +35,4 @@ jobs:
         postgresql db: 'test'
       
     - name: Run test
-      run: nimble test
+      run: nimble test --verbose

@@ -9,7 +9,7 @@ suite "test postgres":
 
   test "insert data":
     query:
-      insert users(name="john3", password="xxxx", lastOnline = !!"CURRENT_TIMESTAMP")
+      insert users(id=1, name="john3", password="xxxx", lastOnline = !!"CURRENT_TIMESTAMP")
 
   test "query data":
     let users = query:

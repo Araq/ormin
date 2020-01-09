@@ -1,6 +1,6 @@
 import unittest, strutils
 from db_postgres import exec
-import ormin
+import ../ormin
 
 importModel(DbBackend.postgre, "model_postgres")
 

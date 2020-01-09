@@ -7,6 +7,7 @@ static:
   functions.add([
     Function(name: "upper", arity: 1, typ: dbVarchar),
     Function(name: "lower", arity: 1, typ: dbVarchar),
+    Function(name: "row", arity: -1, typ: dbUnknown),
   ])
 
 suite "test postgres":
@@ -71,7 +72,23 @@ suite "test postgres":
       limit 1
     assert name == "john1"
 
-  test "ormin sql function coalesce":
+  test "more sql function row with a parameter":
+    let id = 1
+    let name = query:
+      select users(row(name))
+      where id == ?id
+      limit 1
+    assert name == "(john1)"
+
+  # test "more sql function row with two parameters":
+  #   let id = 1
+  #   let row = query:
+  #     select users(row(id, name))
+  #     where id == ?id
+  #     limit 1
+  #   assert row == "(1, john1)"
+    
+  test "ormin sql function coalesce with a parameter":
     let id = 1
     let name = query:
       select users(coalesce(name))

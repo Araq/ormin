@@ -1,0 +1,38 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v1
+      
+    - name: Cache choosenim
+      id: cache-choosenim
+      uses: actions/cache@v1
+      with:
+        path: ~/.choosenim
+        key: ${{ runner.os }}-choosenim-stable
+
+    - name: Cache nimble
+      id: cache-nimble
+      uses: actions/cache@v1
+      with:
+        path: ~/.nimble
+        key: ${{ runner.os }}-nimble-stable
+
+    - uses: jiro4989/setup-nim-action@v1.0.1
+#       with:
+#         nim-version: 'stable'
+
+    - uses: harmon758/postgresql-action@v1
+      with: 
+        postgresql version: '11'
+        postgresql user: 'test'
+        postgresql password: 'test'
+        postgresql db: 'test'
+      
+    - name: Run test
+      run: nimble test --verbose

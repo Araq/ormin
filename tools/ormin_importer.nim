@@ -95,6 +95,7 @@ proc getType(n: SqlNode): DbType =
     of "inet", "ip", "tcpip": k = dbInet
     of "mac", "macaddress": k = dbMacAddress
     of "geometry": k = dbGeometry
+    # of "geometry": k = dbVarchar
     of "point": k = dbPoint
     of "line": k = dbLine
     of "lseg": k = dbLseg

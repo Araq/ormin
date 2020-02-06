@@ -118,11 +118,9 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     when t is string:
-      let dest = newJString(nil)
+      # fix #27 produce json got <typeof(nil)>
       let src = pqgetvalue(queryResult, queryI, idx.cint)
-      let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
-      fillString(dest.src, src, srcLen)
-      x[name] = dest
+      x[name] = newJString($src)
     elif (t is int) or (t is int64):
       x[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
     elif t is float64:

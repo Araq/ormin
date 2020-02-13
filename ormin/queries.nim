@@ -396,7 +396,13 @@ proc cond(n: NimNode; q: var string; params: var Params;
           discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
         elif cmd[1].kind in nnkCallKinds and $cmd[1][0] == "groupby":
           subselect.add " group by "
-          discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
+          let hav = cmd[1][1]
+          if hav.kind in nnkCallKinds and $hav[1][0] == "having":
+            discard cond(hav[0], subselect, params, DbType(kind: dbBool), qb)
+            subselect.add " having "
+            discard cond(hav[1][1], subselect, params, DbType(kind: dbBool), qb)
+          else:
+            discard cond(hav, subselect, params, DbType(kind: dbBool), qb)
         else:
           error "construct not supported in condition: " & treeRepr cmd, cmd
       elif cmd.len >= 2:

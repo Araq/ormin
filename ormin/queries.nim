@@ -725,12 +725,12 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     elif dbBackend == DbBackend.mysql:
       q.returning = ";\nselect LAST_INSERT_ID()"
     else:
-      q.returning = "returning "
+      q.returning = " returning "
     var colname = ""
     let nimType = toNimType lookupColumnInEnv(n[1], colname, q.params, DbType(kind: dbUnknown), q)
     q.singleRow = true
     when dbBackend != DbBackend.sqlite:
-      q.retType.add nimType
+      q.retType.add newIdentDefs(ident(colname), nimType)
       q.retNames.add colname
     else:
       discard nimType

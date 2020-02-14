@@ -259,7 +259,31 @@ suite fmt"test common of {backend}":
                          .mapIt(it.thread)
                          .sortedByIt(it)
 
-  test "query with auto join":
+  test "complex query":
+    # feature for having in subquery
+    let
+      id1 = 2
+      id2 = 3
+    let res = query:
+      select thread(count(_))
+      where id in (
+        select post(thread) where (author == ?id1 or author == ?id2) and id in (
+          select post(min(id)) groupby thread having min(id) > 3))
+      limit 1
+
+    let threadinpost = postdata.mapIt(it.thread).deduplicate().sortedByIt(it)
+    var postminids: seq[int]    
+    for id in threadinpost:
+      {.push warning[deprecated]: off.}
+      let group = lc[p.id | (p <- postdata, p.thread == id), int]
+      {.pop.}
+      postminids.add(group.min())
+    let threadids = postdata.filterIt(it.author in [id1, id2] and
+                                     it.id in postminids.filterIt(it > 3))
+                             .mapIt(it.thread)
+    check res == threadids.len()
+
+  test "query auto join person":
     let postid = 1
     let res = query:
       select post(author)

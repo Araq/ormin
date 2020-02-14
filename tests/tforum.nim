@@ -259,6 +259,16 @@ suite fmt"test common of {backend}":
     let (author, name) = res[0]
     check name == persondata[author - 1].name
 
+  test "query with join on":
+    # test fix #29 Cannot handle join on condition correctly
+    let postid = 1
+    let res = query:
+      select post(author)
+      join person(name) on author == id
+      where id == ?postid
+    let (author, name) = res[0]
+    check name == persondata[author - 1].name
+
   test "query with case when":
     # need more test, only number
     # has problem with string or expression in condition

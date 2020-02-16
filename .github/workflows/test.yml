@@ -7,7 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v1
+    - name: Checkout source code
+      uses: actions/checkout@v1
       
     - name: Cache choosenim
       id: cache-choosenim
@@ -23,16 +24,30 @@ jobs:
         path: ~/.nimble
         key: ${{ runner.os }}-nimble-stable
 
-    - uses: jiro4989/setup-nim-action@v1.0.1
-#       with:
-#         nim-version: 'stable'
+    - name: Setup nim
+      uses: jiro4989/setup-nim-action@v1.0.1
+      # with:
+      #   nim-version: 'stable'
 
-    - uses: harmon758/postgresql-action@v1
+    - name: Setup postgresql
+      uses: harmon758/postgresql-action@v1
       with: 
-        postgresql version: '11'
+        postgresql version: '10'
         postgresql user: 'test'
         postgresql password: 'test'
         postgresql db: 'test'
+
+    - name: Install database client
+      run: sudo apt-get install -y postgresql-client-10 sqlite3
+
+    - name: Install dependencies
+      run: |
+        nimble refresh
+        nimble install
       
     - name: Run test
-      run: nimble test --verbose
+      run: |
+        chmod a+x tests/forum_model_sqlite.sh
+        nimble test
+      env:
+        PGPASSWORD: test

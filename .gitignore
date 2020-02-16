@@ -1,4 +1,7 @@
 tools/ormin_importer
-tests/create_postgres
-tests/tpostgres
-tests/tsqlite
+tests/test.db
+tests/forum_model_sqlite.nim
+tests/forum_model_postgres.nim
+tests/model_postgres.nim
+tests/tforum
+tests/tfunction

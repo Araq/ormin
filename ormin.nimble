@@ -15,8 +15,74 @@ bin = @["tools/ormin_importer"]
 skipDirs = @["examples"]
 installExt = @["nim"]
 
-task test, "Run nimble test":
-  exec "nim c -r tests/tpostgres"
+task initcommonsqlite, "Init sqlite for common test":
+  if existsFile("tests/test.db"): exec "rm tests/test.db"
+  exec "tests/forum_model_sqlite.sh"
 
-before test:
-  exec "nim c -r tests/create_postgres"
+task initcommonpostgre, "init postgresql for common test":
+  exec """psql -U test -wq -h localhost -c "drop table if exists person, thread, post, session, antibot cascade"
+  """
+  exec "psql -U test -wq -h localhost -f tests/forum_model_postgres.sql"
+
+task tcommonsqlite, "Test common of sqlite":
+  --r
+  setCommand "c", "tests/tforum"
+before tcommonsqlite:
+  initcommonsqliteTask()
+
+task tdcommonsqlite, "Test common of sqlite with debugOrminSql":
+  --r
+  --define: debugOrminSql
+  setCommand "c", "tests/tforum"
+before tdcommonsqlite:
+  initcommonsqliteTask()
+
+task tcommonpostgre, "Test common of postgresql":
+  --r
+  --define: postgre
+  setCommand "c", "tests/tforum"
+before tcommonpostgre:
+  initcommonpostgreTask()
+
+task tdcommonpostgre, "Test common of postgresql with debugOrminSql":
+  --r
+  --define: debugOrminSql
+  --define: postgre
+  setCommand "c", "tests/tforum"
+before tdcommonpostgre:
+  initcommonpostgreTask()
+
+task tcommonfuncsqlite, "Test common sql function of sqlite":
+  --r
+  setCommand "c", "tests/tfunction"
+before tcommonfuncsqlite:
+  initcommonsqliteTask()
+
+task tdcommonfuncsqlite, "Test common sql function of sqlite with debugOrminSql":
+  --r
+  --define: debugOrminSql
+  setCommand "c", "tests/tfunction"
+before tdcommonfuncsqlite:
+  initcommonsqliteTask()
+
+task tcommonfuncpostgre, "Test common sql function of postgresql":
+  --r
+  --define: postgre
+  setCommand "c", "tests/tfunction"
+before tcommonfuncpostgre:
+  initcommonpostgreTask()
+
+task tdcommonfuncpostgre, "Test common sql function of postgresql with debugOrminSql":
+  --r
+  --define: debugOrminSql
+  --define: postgre
+  setCommand "c", "tests/tfunction"
+before tdcommonfuncpostgre:
+  initcommonpostgreTask()
+
+task test, "Run all test suite of common feature":
+  exec "nimble tcommonsqlite"
+  exec "nimble tcommonpostgre"
+  exec "nimble tcommonfuncsqlite"
+  exec "nimble tcommonfuncpostgre"
+

@@ -300,6 +300,14 @@ suite fmt"test common of {backend}":
       select antibot(_)
     check res == []
 
+  test "insert with return id":
+    # test fix #28 returning id fail under postgresql 
+      let expectedid = 6
+      let id = query:
+        insert antibot(id = ?expectedid, ip = "", answer = "just insert")
+        returning id
+      check id == expectedid
+
   test "query with produce json":
     # test fix #27 Error: type mismatch: got <typeof(nil)>
     let threadjson = query:

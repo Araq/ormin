@@ -709,6 +709,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
   of "orderby":
     for i in 1..<n.len:
       discard cond(n[i], q.orderby, q.params, DbType(kind: dbUnknown), q)
+      if i != n.len - 1: q.orderby &= ", "
   of "having":
     expectLen n, 2
     let t = cond(n[1], q.having, q.params, DbType(kind: dbBool), q)

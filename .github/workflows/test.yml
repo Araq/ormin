@@ -43,7 +43,7 @@ jobs:
     - name: Install dependencies
       run: |
         nimble refresh
-        nimble install
+        nimble install -y
       
     - name: Run test
       run: |

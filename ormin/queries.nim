@@ -226,6 +226,9 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let b = cond(n[2], q, params, result, qb)
       checkBool b, n[2]
     of "<=", "<", ">=", ">", "==", "!=", "=~":
+      let env = qb.env
+      if env.len == 2:
+        qb.env = @[env[0]]
       let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
       q.add ' '
       if op == "==": q.add equals
@@ -233,6 +236,8 @@ proc cond(n: NimNode; q: var string; params: var Params;
       elif op == "=~": q.add "like"
       else: q.add op
       q.add ' '
+      if env.len == 2:
+        qb.env = @[env[1]]
       let b = cond(n[2], q, params, a, qb)
       checkCompatible a, b, n
       result = DbType(kind: dbBool)
@@ -672,10 +677,13 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         q.kind = qkJoin
         tableSel(cmd[0], q)
         swap q.env, oldEnv
-      let onn = cmd[1][1]
-      q.join.add " on "
-      let t = cond(onn, q.join, q.params, DbType(kind: dbBool), q)
-      checkBool(t, onn)
+        let onn = cmd[1][1]
+        q.join.add " on "
+        oldEnv = q.env
+        q.env.add((tabIndex, alias))
+        let t = cond(onn, q.join, q.params, DbType(kind: dbBool), q)
+        swap q.env, oldEnv
+        checkBool(t, onn)
     elif cmd.kind == nnkCall:
       # auto join:
       let tab = $cmd[0]

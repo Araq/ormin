@@ -195,6 +195,15 @@ suite fmt"test common of {backend}":
       orderby id
     check res == persondata.sortedByIt(it.id).mapIt(it.name)
 
+  test "query with orderby: mulitple key":
+    # test fix #30 Incorrect handling of multiple sort keys in orderby
+    let res = query:
+      select post(author, id)
+      orderby author, desc(id)
+    check res == postdata.mapIt((it.author, it.id))
+                         .sorted((x, y) => system.cmp(x[1], y[1]), Descending)
+                         .sortedByIt(it[0])
+
   test "query with having":
     let countvalue = 2
     let res = query:
@@ -255,6 +264,16 @@ suite fmt"test common of {backend}":
     let res = query:
       select post(author)
       join person(name)
+      where id == ?postid
+    let (author, name) = res[0]
+    check name == persondata[author - 1].name
+
+  test "query with join on":
+    # test fix #29 Cannot handle join on condition correctly
+    let postid = 1
+    let res = query:
+      select post(author)
+      join person(name) on author == id
       where id == ?postid
     let (author, name) = res[0]
     check name == persondata[author - 1].name

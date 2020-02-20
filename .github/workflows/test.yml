@@ -46,8 +46,6 @@ jobs:
         nimble install
       
     - name: Run test
-      run: |
-        chmod a+x tests/forum_model_sqlite.sh
-        nimble test
+      run: nimble test
       env:
         PGPASSWORD: test

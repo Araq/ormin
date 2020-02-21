@@ -1,1 +1,1 @@
-switch("path", "$projectDir/../ormin")
+--path:"$projectDir/../ormin"

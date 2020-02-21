@@ -26,7 +26,9 @@ task initcommonsqlite, "Init sqlite for common test":
   exec &"sqlite3 -init {sqlFile} tests/test.db << EOF .quit EOF"
 
 task initcommonpostgre, "Init postgresql for common test":
-  let sql = gorge("cat tests/forum_model_postgres.sql; echo $?")
+  let
+    sqlFile = testDir / "forum_model_postgres.sql"
+    sql = staticRead(sqlFile)
   var tables = newSeq[string]()
   for line in sql.splitLines():
     if line.strip().startsWith("create table"): 
@@ -36,7 +38,7 @@ task initcommonpostgre, "Init postgresql for common test":
       tables.add(table)
   exec &"""psql -U test -wq -h localhost -c "drop table if exists {tables.join(",")} cascade"
   """
-  exec "psql -U test -wq -h localhost -f tests/forum_model_postgres.sql"
+  exec &"psql -U test -wq -h localhost -f {sqlFile}"
 
 proc initCommonDb(args: string) = 
   if args.contains("-d:postgre"):

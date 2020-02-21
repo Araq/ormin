@@ -28,3 +28,10 @@ suite fmt"test common sql function of {backend}":
     let res = query:
       select person(max(id))
     check res[0] == personcount
+
+  test "query with coalesce: one more args":
+    let id = 1
+    let res = query:
+      select person(coalesce(name, password, email))
+      where id == ?id
+    check res == persondata.filterIt(it.id == id).mapIt(it.name)

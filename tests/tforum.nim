@@ -205,6 +205,18 @@ suite fmt"test common of {backend}":
                          .sortedByIt(it[0])
 
   test "query with having":
+    let id = 4
+    let res = query:
+      select post(author, count(_) as count)
+      groupby author
+      having author == ?id
+    let ct = postdata.mapIt(it.author).toCountTable()
+    {.push warning[deprecated]: off.}
+    let expected = lc[p | (p <- ct.pairs(), p[0] == id), tuple[author, count: int]]
+    {.pop.}
+    check res == expected
+
+  test "query with having: aggregate function":
     let countvalue = 2
     let res = query:
       select post(author, count(id) as count)
@@ -259,8 +271,16 @@ suite fmt"test common of {backend}":
                          .mapIt(it.thread)
                          .sortedByIt(it)
 
-  test "complex query":
+  test "subquery with having":
     # feature for having in subquery
+    let id = 4
+    let res = query:
+      select person(id)
+      where id in (
+        select post(author) groupby author having author == ?id)
+    check res == @[id]
+      
+  test "complex query with subquery and having":
     let
       id1 = 2
       id2 = 3

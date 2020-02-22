@@ -205,6 +205,18 @@ suite fmt"test common of {backend}":
                          .sortedByIt(it[0])
 
   test "query with having":
+    let id = 4
+    let res = query:
+      select post(author, count(_) as count)
+      groupby author
+      having author == ?id
+    let ct = postdata.mapIt(it.author).toCountTable()
+    {.push warning[deprecated]: off.}
+    let expected = lc[p | (p <- ct.pairs(), p[0] == id), tuple[author, count: int]]
+    {.pop.}
+    check res == expected
+
+  test "query with having: aggregate function":
     let countvalue = 2
     let res = query:
       select post(author, count(id) as count)
@@ -259,7 +271,39 @@ suite fmt"test common of {backend}":
                          .mapIt(it.thread)
                          .sortedByIt(it)
 
-  test "query with auto join":
+  test "subquery with having":
+    # feature for having in subquery
+    let id = 4
+    let res = query:
+      select person(id)
+      where id in (
+        select post(author) groupby author having author == ?id)
+    check res == @[id]
+      
+  test "complex query with subquery and having":
+    let
+      id1 = 2
+      id2 = 3
+    let res = query:
+      select thread(count(_))
+      where id in (
+        select post(thread) where (author == ?id1 or author == ?id2) and id in (
+          select post(min(id)) groupby thread having min(id) > 3))
+      limit 1
+
+    let threadinpost = postdata.mapIt(it.thread).deduplicate().sortedByIt(it)
+    var postminids: seq[int]    
+    for id in threadinpost:
+      {.push warning[deprecated]: off.}
+      let group = lc[p.id | (p <- postdata, p.thread == id), int]
+      {.pop.}
+      postminids.add(group.min())
+    let threadids = postdata.filterIt(it.author in [id1, id2] and
+                                     it.id in postminids.filterIt(it > 3))
+                             .mapIt(it.thread)
+    check res == threadids.len()
+
+  test "query auto join person":
     let postid = 1
     let res = query:
       select post(author)

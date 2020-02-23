@@ -1,16 +1,19 @@
 
-import strutils, postgres, json
+import strutils, postgres, json, tables
 
 import db_common
 export db_common
 
 type
   DbConn* = PPGconn    ## encapsulates a database connection
-  PStmt = string ## a identifier for the prepared queries
+  PStmt* = string ## a identifier for the prepared queries
 
-  varchar* = string
-  integer* = int
-  timestamp* = string
+var dbtypetables* {.compileTime.} = {
+  dbVarchar: "string",
+  dbInt: "int",
+  dbTimestamp: "string",
+  dbFloat: "float"
+}.toTable
 
 proc dbError*(db: DbConn) {.noreturn.} =
   ## raises a DbError exception.

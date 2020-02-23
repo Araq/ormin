@@ -5,7 +5,7 @@ when not declared(tableNames):
 when not declared(attributes):
   {.error: "The query DSL requires a attributes const.".}
 
-import macros, strutils, db_common
+import macros, strutils, db_common, tables
 from os import parentDir, `/`
 
 # SQL dialect specific things:
@@ -137,8 +137,8 @@ proc checkCompatibleSet(a, b: DbType; n: NimNode) =
   discard "too implement; might require a richer type system"
 
 proc toNimType(t: DbTypeKind): NimNode {.compileTime.} =
-  let name = ($t).substr(2).toLowerAscii
-  result = ident(name)
+  let typename = dbtypetables[t]
+  result = ident(typename)
 
 proc toNimType(t: DbType): NimNode {.compileTime.} = toNimType(t.kind)
 

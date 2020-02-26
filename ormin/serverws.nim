@@ -16,7 +16,7 @@ proc hint(msg: string) = echo "[Hint] ", msg
 
 type
   Client = ref object
-    socket: AsyncSocket
+    socket: AsyncWebSocket
     connected: bool
     hostname: string
     id: int
@@ -31,7 +31,7 @@ type
     gid: int
     handler: ReqHandler
 
-proc newClient(s: Server; socket: AsyncSocket, hostname: string): Client =
+proc newClient(s: Server; socket: AsyncWebSocket, hostname: string): Client =
   inc s.gid
   result = Client(socket: socket, connected: true, hostname: hostname, id: s.gid)
 
@@ -114,13 +114,14 @@ proc processClient(server: Server, client: Client) {.async.} =
         error("Client ($1) attempted to send bad JSON? " % $client & "\n" &
               processFut.error.msg)
         #client.connected = false
-  client.socket.close()
+  await client.socket.close()
 
 proc onRequest(server: Server, req: Request; key: string) {.async.} =
   let (ws, error) = await verifyWebsocketRequest(req, key)
   if ws != nil:
     hint("Client connected from " & req.hostname)
-    server.clients.add(newClient(server, req.client, req.hostname))
+    ws.protocol = key
+    server.clients.add(newClient(server, ws, req.hostname))
     asyncCheck processClient(server, server.clients[^1])
   else:
     warn("WS negotiation failed: " & error)

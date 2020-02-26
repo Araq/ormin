@@ -875,6 +875,9 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 
   template ifStmt2(prepStmt, returnsData, action) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
+    bind dbError
     if stepQuery(db, prepStmt, returnsData):
       action
       stopQuery(db, prepStmt)
@@ -883,17 +886,25 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       dbError(db)
 
   template ifStmt1(prepStmt, returnsData, action) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
     if stepQuery(db, prepStmt, returnsData):
       action
     stopQuery(db, prepStmt)
 
   template whileStmt(prepStmt, res, it, action) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
     while stepQuery(db, prepStmt, 1):
       action
       add res, it
     stopQuery(db, prepStmt)
 
   template insertQueryReturningId(prepStmt) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
+    bind getLastId
+    bind dbError
     var insertedId = -1
     if stepQuery(db, prepStmt, 0):
       insertedId = getLastId(db, prepStmt)

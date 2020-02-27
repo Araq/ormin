@@ -1,5 +1,5 @@
 
-import "../ormin/ormin", "../../ormin/serverws", json
+import ormin, ormin/serverws, json
 
 importModel(DbBackend.sqlite, "forum_model")
 

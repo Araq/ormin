@@ -44,8 +44,12 @@ jobs:
       run: |
         nimble refresh
         nimble install -y
+        nimble install karax -y
       
     - name: Run test
       run: nimble test
       env:
         PGPASSWORD: test
+
+    - name: Build examples
+      run: nimble buildexamples

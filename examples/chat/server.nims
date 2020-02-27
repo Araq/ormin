@@ -1,1 +1,2 @@
 --define: ssl
+--path:"$projectDir/../../../ormin"

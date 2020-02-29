@@ -120,18 +120,28 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   if pqgetisnull(queryResult, queryI, idx.cint) != 0:
     x[name] = newJNull()
   else:
-    when t is string:
-      # fix #27 produce json got <typeof(nil)>
-      let src = pqgetvalue(queryResult, queryI, idx.cint)
-      x[name] = newJString($src)
-    elif (t is int) or (t is int64):
-      x[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
-    elif t is float64:
-      x[name] = newJFloat(c_strtod(pqgetvalue(queryResult, queryI, idx.cint)))
-    elif t is bool:
-      x[name] = newJBool(isTrue(pqgetvalue(queryResult, queryI, idx.cint)))
-    else:
-      {.error: "invalid type for JSON object".}
+    bindToJson(db, s, idx, x, t, name)
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc; name: string) =
+  {.error: "invalid type for JSON object".}    
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc[string]; name: string) =
+  let src = pqgetvalue(queryResult, queryI, idx.cint)
+  obj[name] = newJString($src)  
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc[int|int64]; name: string) =
+  obj[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc[float64]; name: string) =
+  obj[name] = newJFloat(c_strtod(pqgetvalue(queryResult, queryI, idx.cint)))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc[bool]; name: string) =
+  obj[name] = newJBool(isTrue(pqgetvalue(queryResult, queryI, idx.cint)))
 
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):

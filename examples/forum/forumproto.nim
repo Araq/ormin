@@ -3,18 +3,16 @@ import ormin, ormin/serverws, json
 
 importModel(DbBackend.sqlite, "forum_model")
 
+static:
+  dbtypetables.add(dbInet, "string")
+  
 var db {.global.} = open("stuff", "", "", "")
 
 protocol "forumclient.nim":
   common:
     when defined(js):
-      type kstring = cstring
-    else:
-      type kstring = string
-    type
-      inet = kstring
-      varchar = kstring
-      timestamp = kstring
+      type string = cstring
+
   server:
     query:
       delete antibot

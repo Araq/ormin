@@ -14,13 +14,8 @@ var db {.global.} = open("chat.db", "", "", "")
 protocol "chatclient.nim":
   # A 'common' code section is shared by both the client and the server:
   common:
-    when not defined(js):
-      type kstring = string
-    type
-      inet = kstring
-      varchar = kstring
-      timestamp = kstring
-
+    when defined(js):
+      type string = cstring
 
   server "get recent messages":
     let lastMessages = query:

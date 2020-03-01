@@ -12,7 +12,10 @@ var dbtypetables* {.compileTime.} = {
   dbVarchar: "string",
   dbInt: "int",
   dbTimestamp: "string",
-  dbFloat: "float"
+  dbFloat: "float",
+  dbSerial: "int",
+  dbBool: "bool",
+  dbJson: "JsonNode",
 }.toTable
 
 proc dbError*(db: DbConn) {.noreturn.} =
@@ -110,6 +113,11 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
   dest = c_strtod(pqgetvalue(queryResult, queryI, idx.cint))
 
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var JsonNode;
+                     t: typedesc; name: string) =
+  let src = pqgetvalue(queryResult, queryI, idx.cint)
+  dest = parseJson($src)
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -143,6 +151,11 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                          t: typedesc[bool]; name: string) =
   obj[name] = newJBool(isTrue(pqgetvalue(queryResult, queryI, idx.cint)))
 
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                         t: typedesc[JsonNode]; name: string) =
+  let src = pqgetvalue(queryResult, queryI, idx.cint)
+  obj[name] = parseJson($src)
+  
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):
     var queryResult {.inject.} = pqexecPrepared(db, s, int32(parr.len),

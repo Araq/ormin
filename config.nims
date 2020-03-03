@@ -2,9 +2,10 @@ import strformat, strutils
 from os import `/`
 
 let
-  testDir = projectDir() / "tests"
+  testDir = thisDir() / "tests"
   commonTest = testDir / "tforum"
   commonFuncTest = testDir / "tfunction"
+  postgreTest = testDir / "tpostgre"
 
 proc parseArgs(): string =
   let numParams = paramCount()
@@ -56,3 +57,15 @@ task tfunction, "Test common sql functions":
   let args = parseArgs()
   initCommonDb(args)
   selfExec &"run {args} {commonFuncTest}"
+
+# Test task for special feature of postgresql:
+task initpostgre, "Init postgresql for specail test":
+  let sqlFile = testDir / "model_postgre.sql"
+  exec """psql -U test -wq -h localhost -c "drop table if exists alltype"
+  """
+  exec &"psql -U test -wq -h localhost -f {sqlFile}"
+
+task tpostgre, "Test special of postgresql":
+  let args = parseArgs()
+  selfExec "initpostgre"
+  selfExec &"run {args} {postgreTest}"

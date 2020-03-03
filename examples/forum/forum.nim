@@ -3,6 +3,9 @@ import ormin, json
 
 importModel(DbBackend.sqlite, "forum_model")
 
+static:
+  dbTypeMap.add(dbInet, "string")
+  
 var db {.global.} = open("stuff", "", "", "")
 
 #var db: DbConn

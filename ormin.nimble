@@ -20,6 +20,7 @@ task test, "Run all test suite":
   selfExec "tfunction"
   selfExec "-d:postgre tcommon"
   selfExec "-d:postgre tfunction"
+  selfExec "tpostgre"
 
 task buildexamples, "Build examples: chat and forum":
   selfExec "c examples/chat/server"

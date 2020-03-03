@@ -4,9 +4,10 @@ nimcache
 tools/ormin_importer
 tests/forum_model_sqlite.nim
 tests/forum_model_postgres.nim
-tests/model_postgres.nim
+tests/model_postgre.nim
 tests/tforum
 tests/tfunction
+tests/tpostgre
 examples/chat/chat_model.nim
 examples/chat/chatclient.nim
 examples/chat/createdb

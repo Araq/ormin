@@ -1,16 +1,20 @@
 
 {.deadCodeElim: on.}
 
-import strutils, sqlite3, json
+import sqlite3, json, tables
 
 import db_common
 export db_common
 
 type
   DbConn* = PSqlite3  ## encapsulates a database connection
-  varchar* = string
-  integer* = int
-  timestamp* = string
+
+var dbTypeMap* {.compileTime.} = {
+  dbVarchar: "string",
+  dbInt: "int",
+  dbTimestamp: "string",
+  dbFloat: "float"
+}.toTable
 
 proc dbError*(db: DbConn) {.noreturn.} =
   ## raises a DbError exception.

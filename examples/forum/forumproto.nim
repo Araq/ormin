@@ -4,14 +4,18 @@ import ormin, ormin/serverws, json
 importModel(DbBackend.sqlite, "forum_model")
 
 static:
-  dbtypetables.add(dbInet, "string")
+  dbTypeMap.add(dbInet, "string")
   
 var db {.global.} = open("stuff", "", "", "")
 
 protocol "forumclient.nim":
   common:
+    typemap:
+      kstring = string
     when defined(js):
-      type string = cstring
+      type kstring = cstring
+    else:
+      type kstring = string
 
   server:
     query:

@@ -9,7 +9,7 @@ export db_common
 type
   DbConn* = PSqlite3  ## encapsulates a database connection
 
-var dbtypetables* {.compileTime.} = {
+var dbTypeMap* {.compileTime.} = {
   dbVarchar: "string",
   dbInt: "int",
   dbTimestamp: "string",

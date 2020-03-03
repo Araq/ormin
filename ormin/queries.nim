@@ -30,6 +30,8 @@ var
     Function(name: "isnull", arity: 3, typ: dbUnknown),
     Function(name: "concat", arity: -1, typ: dbVarchar)
   ]
+  
+var clientTypeMap {.compileTime.} = initTable[string, string]()
 
 type
   Env = seq[(int, string)]
@@ -137,7 +139,7 @@ proc checkCompatibleSet(a, b: DbType; n: NimNode) =
   discard "too implement; might require a richer type system"
 
 proc toNimType(t: DbTypeKind): NimNode {.compileTime.} =
-  let typename = dbtypetables[t]
+  let typename = dbTypeMap[t]
   result = ident(typename)
 
 proc toNimType(t: DbType): NimNode {.compileTime.} = toNimType(t.kind)
@@ -986,6 +988,12 @@ proc getTypename(n: NimNode): NimNode =
   if result.kind == nnkPostfix:
     result = result[1]
 
+proc replaceType(n: NimNode): NimNode =
+  expectKind n, nnkIdent
+  let x = $n
+  let clientType = clientTypeMap.getOrDefault(x, x)
+  result = ident(clientType)
+
 proc addFields(n: NimNode; b: ProtoBuilder): NimNode =
   if n.kind == nnkObjectTy and not b.foundObj:
     b.foundObj = true
@@ -997,8 +1005,9 @@ proc addFields(n: NimNode; b: ProtoBuilder): NimNode =
     expectKind x, nnkRecList
     doAssert b.retType.len == b.retNames.len, "ormin: types and column names do not match"
     for i in 0 ..< b.retType.len:
+      let clientType = replaceType(b.retType[i][1])
       x.add newTree(nnkIdentDefs, newTree(nnkPostfix, ident"*", ident(b.retNames[i])),
-                    b.retType[i][1], newEmptyNode())
+                    clientType, newEmptyNode())
     return n
   result = copyNimNode(n)
   for i in 0 ..< n.len:
@@ -1092,6 +1101,14 @@ proc transformServer(n: NimNode; b: ProtoBuilder): NimNode =
   for i in 0 ..< n.len:
     result.add transformServer(n[i], b)
 
+proc registerTypeMap(n: NimNode) =
+  expectKind n, nnkStmtList
+  for s in n:
+    if s.kind == nnkAsgn:
+      clientTypeMap[$s[1]] = $s[0]
+    else:
+      error "Incorrect typemap declaration"
+
 proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
   case n.kind
   of nnkCallKinds:
@@ -1120,8 +1137,11 @@ proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
         expectLen n, 2
         expectKind n[1], nnkStmtList
         for s in n[1]:
-          b.types.add copyNimTree(s)
-          b.server.add s
+          if s.kind == nnkCall and $s[0] == "typemap":
+            registerTypeMap(s[1])
+          else:
+            b.types.add copyNimTree(s)
+            b.server.add s
         return newTree(nnkNone)
   else: discard
   result = copyNimNode(n)

@@ -8,7 +8,7 @@ type
   DbConn* = PPGconn    ## encapsulates a database connection
   PStmt* = string ## a identifier for the prepared queries
 
-var dbtypetables* {.compileTime.} = {
+var dbTypeMap* {.compileTime.} = {
   dbVarchar: "string",
   dbInt: "int",
   dbTimestamp: "string",

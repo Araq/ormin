@@ -798,10 +798,10 @@ proc queryAsString(q: QueryBuilder): string =
   when defined(debugOrminSql):
     echo "\n", result
 
-proc newGlobalVar(name, value: NimNode): NimNode =
+proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
   result = newTree(nnkVarSection,
     newTree(nnkIdentDefs, newTree(nnkPragmaExpr, name,
-      newTree(nnkPragma, ident"global")), newEmptyNode(), value)
+      newTree(nnkPragma, ident"global")), typ, value)
   )
 
 proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
@@ -821,8 +821,12 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   let sql = queryAsString(q)
   let prepStmt = genSym(nskVar)
   let res = genSym(nskVar)
-  result = newTree(if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
-    newGlobalVar(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
+  let prepStmtCall = newCall(bindSym"prepareStmt", ident"db", newLit sql)
+  result = newTree(
+    if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
+    # really hack-ish
+    newGlobalVar(prepStmt, newCall(bindSym"typeof", prepStmtCall), newEmptyNode()),
+    getAst(once(newAssignment(prepStmt, prepStmtCall)))
   )
   let rtyp = if q.retType.len > 1 or q.retType.len == 0:
     q.retType

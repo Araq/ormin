@@ -1,5 +1,5 @@
 
-import strutils, postgres, json
+import strutils, postgres, json, times
 
 import db_common
 export db_common
@@ -10,7 +10,10 @@ type
 
   varchar* = string
   integer* = int
-  timestamp* = string
+  timestamp* = Datetime
+  serial* = int
+
+var jsonTimeFormat* = "yyyy-MM-dd HH:mm:ss"
 
 proc dbError*(db: DbConn) {.noreturn.} =
   ## raises a DbError exception.
@@ -43,7 +46,12 @@ template startBindings*(s: PStmt; n: int) {.dirty.} =
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
   when not (x is t):
     {.error: "type mismatch for query argument at position " & $idx.}
-  pparams[idx-1] = $x
+  when t is DateTime:
+    let xx = x.format("yyyy-MM-dd HH:mm:ss\'.\'ffffffzzzz")
+    pparams[idx-1] = $xx
+  else:
+    pparams[idx-1] = $x
+
   parr[idx-1] = cstring(pparams[idx-1])
 
 template bindParamUnchecked(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
@@ -57,24 +65,41 @@ template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
     # a NULL entry is not reflected in the 'pparams' array:
     parr[idx-1] = cstring(nil)
   else:
-    when t is string:
-      doAssert x.kind == JString
-      let xs = x.str
-      bindParamUnchecked(db, s, idx, xs, t)
-    elif (t is int) or (t is int64):
-      doAssert x.kind == JInt
-      let xi = x.num
-      bindParamUnchecked(db, s, idx, xi, t)
-    elif t is float64:
-      doAssert x.kind == JFloat
-      let xf = x.fnum
-      bindParamUnchecked(db, s, idx, xf, t)
-    elif t is bool:
-      doAssert x.kind == JBool
-      let xb = x.bval
-      bindParamUnchecked(db, s, idx, xb, t)
-    else:
-      {.error: "invalid type for JSON object".}
+    bindFromJson(db, s, idx, x, t)
+
+template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
+                       t: typedesc) =
+  {.error: "invalid type for JSON object".}
+
+template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
+                       t: typedesc[string]) =
+  doAssert x.kind == JString
+  let xs = x.str
+  bindParamUnchecked(db, s, idx, xs, t)
+
+template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
+                       t: typedesc[int|int64]) =
+  doAssert x.kind == JInt
+  let xi = x.num
+  bindParamUnchecked(db, s, idx, xi, t)
+
+template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
+                       t: typedesc[float64]) =
+  doAssert x.kind == JFloat
+  let xf = x.fnum
+  bindParamUnchecked(db, s, idx, xf, t)
+
+template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
+                       t: typedesc[bool]) =
+  doAssert x.kind == JBool
+  let xb = x.bval
+  bindParamUnchecked(db, s, idx, xb, t)  
+
+template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
+                       t: typedesc[DateTime]) =
+  doAssert x.kind == JString
+  let dt = x.str
+  bindParamUnchecked(db, s, idx, dt, t)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int;
                      t: typedesc; name: string) =
@@ -107,6 +132,27 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
   dest = c_strtod(pqgetvalue(queryResult, queryI, idx.cint))
 
+
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var DateTime;
+                     t: typedesc; name: string) =
+  let
+    src = $pqgetvalue(queryResult, queryI, idx.cint)
+    i = src.find('.')
+    tzflag = src[src.len-3]
+  if i < 0:
+    if tzflag in {'+', '-'}:
+      dest = parse(src, "yyyy-MM-dd HH:mm:sszz")
+    else:
+      dest = parse(src, "yyyy-MM-dd HH:mm:ss")
+  else:
+    if tzflag in {'+', '-'}:
+      let itz = src.len - 3
+      let dtstr = src[0..<itz] & '0'.repeat(10-src.len+i) & src[src.len-3 .. ^1]
+      dest = parse(dtstr, "yyyy-MM-dd HH:mm:ss\'.\'ffffffzz")
+    else:
+      let dtstr = src & '0'.repeat(7-src.len+i)
+      dest = parse(dtstr, "yyyy-MM-dd HH:mm:ss\'.\'ffffff")
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -117,19 +163,35 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   if pqgetisnull(queryResult, queryI, idx.cint) != 0:
     x[name] = newJNull()
   else:
-    when t is string:
-      # fix #27 produce json got <typeof(nil)>
-      let src = pqgetvalue(queryResult, queryI, idx.cint)
-      x[name] = newJString($src)
-    elif (t is int) or (t is int64):
-      x[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
-    elif t is float64:
-      x[name] = newJFloat(c_strtod(pqgetvalue(queryResult, queryI, idx.cint)))
-    elif t is bool:
-      x[name] = newJBool(isTrue(pqgetvalue(queryResult, queryI, idx.cint)))
-    else:
-      {.error: "invalid type for JSON object".}
+    bindToJson(db, s, idx, x, t, name)
 
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc; name: string) =
+  {.error: "invalid type for JSON object".}    
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[string]; name: string) =
+  let src = pqgetvalue(queryResult, queryI, idx.cint)
+  obj[name] = newJString($src)  
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[int|int64]; name: string) =
+  obj[name] = newJInt(c_strtol(pqgetvalue(queryResult, queryI, idx.cint)))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[float64]; name: string) =
+  obj[name] = newJFloat(c_strtod(pqgetvalue(queryResult, queryI, idx.cint)))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[bool]; name: string) =
+  obj[name] = newJBool(isTrue(pqgetvalue(queryResult, queryI, idx.cint)))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[DateTime]; name: string) =
+  var dt: DateTime
+  bindResult(db, s, idx, dt, t, name)
+  obj[name] = newJString(format(dt, jsonTimeFormat))
+  
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):
     var queryResult {.inject.} = pqexecPrepared(db, s, int32(parr.len),

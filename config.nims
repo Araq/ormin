@@ -2,7 +2,7 @@ import strformat, strutils
 from os import `/`
 
 let
-  testDir = projectDir() / "tests"
+  testDir = thisDir() / "tests"
   commonTest = testDir / "tforum"
   commonFuncTest = testDir / "tfunction"
 

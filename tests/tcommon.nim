@@ -1,30 +1,38 @@
-import unittest, json, strutils, sequtils, macros, times, os
+import unittest, json, strutils, strformat, sequtils, macros, times, os, math
 import ormin
 import ./utils
 
 when defined(postgre):
   from db_postgres import exec, getValue
 
-  importModel(DbBackend.postgre, "model_postgre")
+  const backend = DbBackend.postgre
+  importModel(backend, "model_postgre")
   const sqlFileName = "model_postgre.sql"
   let db {.global.} = open("localhost", "test", "test", "test")
 else:
   from db_sqlite import exec, getValue
 
-  importModel(DbBackend.sqlite, "model_sqlite")
+  const backend = DbBackend.sqlite
+  importModel(backend, "model_sqlite")
   const sqlFileName = "model_sqlite.sql"
-  let db {.global.} = open("test.db", "", "", "")
+  let db {.global.} = open(":memory:", "", "", "")
 
 let
   testDir = currentSourcePath.parentDir()
   sqlFile = testDir / sqlFileName
 
 
-let seqs = toSeq(1..3)
+let
+  min = 1
+  max = 3
+  seqs = toSeq(min..max)
+
+suite &"Test common database types and functions of {backend}":
+  discard
 
 suite "serial_insert":
   setup:
-    db.dropTable("tb_serial")
+    db.dropTable(sqlFile, "tb_serial")
     db.createTable(sqlFile, "tb_serial")
 
   test "insert":
@@ -42,7 +50,7 @@ suite "serial_insert":
 
 
 suite "serial":
-  db.dropTable("tb_serial")
+  db.dropTable(sqlFile, "tb_serial")
   db.createTable(sqlFile, "tb_serial")
 
   let insertSql = sql"insert into tb_serial(typinteger) values (?)"
@@ -69,10 +77,35 @@ suite "serial":
       produce json
     check res == %*seqs.mapIt(%*{"typserial": it, "typinteger": it})
 
+  test "count":
+    let res = query:
+      select tb_serial(count(_))
+    check res[0] == seqs.len
+
+  test "sum":
+    let res = query:
+      select tb_serial(sum(typinteger))
+    check res[0] == seqs.sum()
+
+  test "avg":
+    let res = query:
+      select tb_serial(avg(typinteger))
+    check res[0] == seqs.sum() / seqs.len()
+
+  test "min":
+    let res = query:
+      select tb_serial(min(typinteger))
+    check res[0] == min
+
+  test "max":
+    let res = query:
+      select tb_serial(max(typinteger))
+    check res[0] == max
+
 
 suite "boolean_insert":
   setup:
-    db.dropTable("tb_boolean")
+    db.dropTable(sqlFile, "tb_boolean")
     db.createTable(sqlFile, "tb_boolean")
 
   test "insert":
@@ -91,7 +124,7 @@ suite "boolean_insert":
 
 
 suite "boolean":
-  db.dropTable("tb_boolean")
+  db.dropTable(sqlFile, "tb_boolean")
   db.createTable(sqlFile, "tb_boolean")
 
   proc toBool(x: int): bool =
@@ -132,7 +165,7 @@ let fs = [3.14, 2.56, 10.45]
 
 suite "float_insert":
   setup:
-    db.dropTable("tb_float")
+    db.dropTable(sqlFile, "tb_float")
     db.createTable(sqlFile, "tb_float")
 
   test "insert":
@@ -150,7 +183,7 @@ suite "float_insert":
 
 
 suite "float":
-  db.dropTable("tb_float")
+  db.dropTable(sqlFile, "tb_float")
   db.createTable(sqlFile, "tb_float")
 
   let insertSql = sql"insert into tb_float(typfloat) values (?)"

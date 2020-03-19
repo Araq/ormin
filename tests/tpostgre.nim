@@ -1,4 +1,4 @@
-import unittest, postgres, json, strutils, sequtils, macros, times, os
+import unittest, postgres, json, strutils, macros, times, os
 import ormin
 from db_postgres import exec, getValue
 import ./utils
@@ -9,6 +9,10 @@ let
   db {.global.} = open("localhost", "test", "test", "test")
   testDir = currentSourcePath.parentDir()
   sqlFile = testDir / "model_postgre.sql"
+
+
+suite "Test special database types and functions of postgre":
+  discard
 
 let
   dtStr1 = "2018-03-30 01:01:01"
@@ -43,7 +47,7 @@ let insertSql =  sql"insert into tb_timestamp(dt, dtn, dtz) values (?, ?, ?)"
             
 suite "timestamp_insert":
   setup:
-    db.dropTable("tb_timestamp")
+    db.dropTable(sqlFile, "tb_timestamp")
     db.createTable(sqlFile, "tb_timestamp")
 
   test "insert":
@@ -59,7 +63,7 @@ suite "timestamp_insert":
     check db.getValue(sql"select count(*) from tb_timestamp") == "1"
 
 suite "timestamp":
-  db.dropTable("tb_timestamp")
+  db.dropTable(sqlFile, "tb_timestamp")
   db.createTable(sqlFile, "tb_timestamp")
 
   db.exec(insertSql, dtStr1, dtnStr1, dtzStr1)

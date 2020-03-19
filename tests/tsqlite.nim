@@ -6,10 +6,13 @@ import ./utils
 importModel(DbBackend.sqlite, "model_sqlite")
 
 let
-  db {.global.} = open("test.db", "", "", "")
+  db {.global.} = open(":memory:", "", "", "")
   testDir = currentSourcePath.parentDir()
   sqlFile = testDir / "model_sqlite.sql"
 
+
+suite "Test special database types and functions of sqlite":
+  discard
 
 jsonTimeFormat = "yyyy-MM-dd HH:mm:ss\'.\'fff"
 let
@@ -23,7 +26,7 @@ let insertSql =  sql"insert into tb_timestamp(dt1, dt2) values (?, ?)"
 
 suite "timestamp_insert":
   setup:
-    db.dropTable("tb_timestamp")
+    db.dropTable(sqlFile, "tb_timestamp")
     db.createTable(sqlFile, "tb_timestamp")
 
   test "insert":
@@ -37,7 +40,7 @@ suite "timestamp_insert":
     check db.getValue(sql"select count(*) from tb_timestamp") == "1"
 
 suite "timestamp":
-  db.dropTable("tb_timestamp")
+  db.dropTable(sqlFile, "tb_timestamp")
   db.createTable(sqlFile, "tb_timestamp")
 
   db.exec(insertSql, dtStr1, dtStr2)

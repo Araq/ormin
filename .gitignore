@@ -6,8 +6,7 @@ tests/forum_model_sqlite.nim
 tests/forum_model_postgres.nim
 tests/model_postgre.nim
 tests/model_sqlite.nim
-tests/tforum
-tests/tfunction
+tests/tfeature
 tests/tcommon
 tests/tpostgre
 tests/tsqlite

@@ -1,15 +1,38 @@
-import db_common, strutils
+import db_common, strutils, strformat, re
 from db_postgres import nil
 from db_sqlite import nil
 
 type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 
-proc createTable*(db: DbConn; sqlFile, name: string) =
-  let model = readFile(sqlFile)
-  for m in model.split(';'):
-    let x = m.strip()
-    if x != "" and x.find("create table if not exists " & name) > -1:
-      db.exec(sql(m))  
+iterator tablePairs(sqlFile: string): tuple[name, model: string] =
+  let f = readFile(sqlFile)
+  for m in f.split(';'):
+    if m.strip() != "" and
+       m =~ re"\n*create\s+table(\s+if\s+not\s+exists)?\s+(\w+)":
+      yield (matches[1], m)
 
-proc dropTable*(db: DbConn, name: string) =
-  db.exec(sql("drop table if exists " & name))
+proc createTable*(db: DbConn; sqlFile: string) =
+  for _, m in tablePairs(sqlFile):
+    db.exec(sql(m))
+
+proc createTable*(db: DbConn; sqlFile, name: string) =
+  for n, m in tablePairs(sqlFile):
+    if n == name:
+      db.exec(sql(m))
+      return
+  raiseAssert &"table: {name} not found in: {sqlFile}"
+
+proc dropTable*(db: DbConn; sqlFile: string) =
+  for n, _ in tablePairs(sqlFile):
+    when defined(postgre):
+      db.exec(sql("drop table if exists " & n & " cascade"))
+    else:
+      db.exec(sql("drop table if exists " & n))
+
+proc dropTable*(db: DbConn; sqlFile, name: string) =
+  for n, _ in tablePairs(sqlFile):
+    if n == name:
+      when defined(postgre):
+        db.exec(sql("drop table if exists " & n & " cascade"))
+      else:
+        db.exec(sql("drop table if exists " & n))

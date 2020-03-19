@@ -16,13 +16,11 @@ skipDirs = @["examples"]
 installExt = @["nim"]
 
 task test, "Run all test suite":
-  selfExec "tcommon"
-  selfExec "tfunction"
-  selfExec "-d:postgre tcommon"
-  selfExec "-d:postgre tfunction"
+  exec "nim c -r tests/tfeature"
   exec "nim c -r tests/tcommon"
-  exec "nim c -r -d:postgre tests/tcommon"
   exec "nim c -r tests/tsqlite"
+  exec "nim c -r -d:postgre tests/tfeature"
+  exec "nim c -r -d:postgre tests/tcommon"
   exec "nim c -r tests/tpostgre"
 
 task buildexamples, "Build examples: chat and forum":

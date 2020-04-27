@@ -1,5 +1,8 @@
 import strformat, strutils
-from os import `/`
+when (NimMajor, NimMinor) < (1, 3):
+    from os import `/`
+else:
+    from os import `/`, paramCount, paramStr
 
 let
   testDir = thisDir() / "tests"

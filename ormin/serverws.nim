@@ -124,8 +124,8 @@ proc onRequest(server: Server, req: Request; key: string) {.async.} =
     server.clients.add(newClient(server, ws, req.hostname))
     asyncCheck processClient(server, server.clients[^1])
   else:
-    warn("WS negotiation failed: " & error)
-    await req.respond(Http400, "WebSocket negotiation failed: " & error)
+    warn("WS negotiation failed: " & $error)
+    await req.respond(Http400, "WebSocket negotiation failed: " & $error)
     req.client.close()
 
 proc serve*(key: string; handler: ReqHandler) =

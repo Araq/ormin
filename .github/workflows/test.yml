@@ -5,7 +5,11 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    strategy:
+      matrix:
+        nim:
+          - 1.0.6
+    name: Test on nim ${{ matrix.nim }}
     steps:
     - name: Checkout source code
       uses: actions/checkout@v1
@@ -25,9 +29,9 @@ jobs:
         key: ${{ runner.os }}-nimble-stable
 
     - name: Setup nim
-      uses: jiro4989/setup-nim-action@v1.0.1
-      # with:
-      #   nim-version: 'stable'
+      uses: jiro4989/setup-nim-action@v1
+      with:
+        nim-version: ${{ matrix.nim }}
 
     - name: Setup postgresql
       uses: harmon758/postgresql-action@v1
@@ -36,11 +40,6 @@ jobs:
         postgresql user: 'test'
         postgresql password: 'test'
         postgresql db: 'test'
-
-    - name: Install database client
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y postgresql-client-10 sqlite3
 
     - name: Install dependencies
       run: |

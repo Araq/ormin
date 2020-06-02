@@ -1,79 +1,194 @@
-import unittest, strformat, sequtils, algorithm, sugar, json, tables
+import unittest, strformat, sequtils, algorithm, sugar, json, tables, random, os
 import ../ormin
+import ./utils
 
-include initdb
+let testDir = currentSourcePath.parentDir()
 
-suite fmt"test common of {backend}":
-  test "query a table":
+when defined postgre:
+  from db_postgres import exec, getValue
+
+  const backend = DbBackend.postgre
+  importModel(backend, "forum_model_postgres")
+  const sqlFileName = "forum_model_postgres.sql"
+  let db {.global.} = open("localhost", "test", "test", "test")
+else:
+  from db_sqlite import exec, getValue
+
+  const backend = DbBackend.sqlite
+  importModel(backend, "forum_model_sqlite")
+  const sqlFileName = "forum_model_sqlite.sql"
+  let db {.global.} = open(testDir / ":memory:", "", "", "")
+
+let sqlFile = testDir / sqlFileName
+
+type
+  Person = tuple[id: int,
+                name: string,
+                password: string,
+                email: string,
+                salt: string,
+                status: string]
+  Thread = tuple[id: int,
+                name: string,
+                views: int]
+  Post = tuple[id: int,
+              author: int,
+              ip: string,
+              header: string,
+              content: string,
+              thread: int]
+  Antibot = tuple[id: int,
+                  ip: string,
+                  answer: string]
+
+const
+  personcount = 5
+  threadcount = 5
+  postcount = 10
+  antibotcount = 5
+var
+  persondata: seq[Person]
+  threaddata: seq[Thread]
+  postdata: seq[Post]
+  antibotdata: seq[Antibot]   
+
+
+suite &"Test ormin features of {backend}":
+  discard
+
+suite "query":
+  db.dropTable(sqlFile)
+  db.createTable(sqlFile)
+
+  # prepare data to insert  
+  for i in 1..personcount:
+    persondata.add((id: i,
+                    name: fmt"john{i}",
+                    password: fmt"pass{i}",
+                    email: fmt"john{i}@mail.com",
+                    salt: fmt"abcd{i}",
+                    status: fmt"ok{i}"))
+
+  for i in 1..threadcount:
+    threaddata.add((id: i,
+                    name: fmt"thread{i}",
+                    views: i))
+
+  for i in 1..postcount:
+    postdata.add((id: i,
+                  author: sample({1..personcount}),
+                  ip: "",
+                  header: fmt"title{i}",
+                  content: fmt"content{i}",
+                  thread: sample({1..threadcount})))
+
+  for i in 1..antibotcount:
+    antibotdata.add((id: i,
+                    ip: "",
+                    answer: fmt"answer{i}"))
+
+  # insert data into database
+  let
+    insertperson = sql"insert into person (id, name, password, email, salt, status) values (?, ?, ?, ?, ?, ?)"
+    insertthread = sql"insert into thread (id, name, views) values (?, ?, ?)"
+    insertpost = sql"insert into post (id, author, ip, header, content, thread) values (?, ?, ?, ?, ?, ?)"
+    insertantibot = sql"insert into antibot (id, ip, answer) values (?, ?, ?)"
+
+  for p in persondata:
+    db.exec(insertperson, p.id, p.name, p.password, p.email, p.salt, p.status)
+
+  for t in threaddata:
+    db.exec(insertthread, t.id, t.name, t.views)
+
+  for p in postdata:
+    db.exec(insertpost, p.id, p.author, p.ip, p.header, p.content, p.thread)
+
+  for a in antibotdata:
+    db.exec(insertantibot, a.id, a.ip, a.answer)
+
+  # check data in database
+  let personexpected = db.getValue(sql"select count(*) from person")
+  assert personexpected == $personcount
+
+  let threadexpected = db.getValue(sql"select count(*) from thread")
+  assert threadexpected == $threadcount
+
+  let postexpected = db.getValue(sql"select count(*) from post")
+  assert postexpected == $postcount
+
+  let antibotexpected = db.getValue(sql"select count(*) from antibot")
+  assert antibotexpected == $antibotcount
+
+  test "table":
     let res = query:
       select person(id, name, password, email, salt, status)
     check res == persondata
 
-  test "query with all column":
+  test "all_column":
     let res = query:
       select person(_)
     check res.mapIt((it.id, it.name, it.password, it.email, it.salt, it.status)) == persondata
   
-  test "query with column alias":
+  test "column_alias":
     let res = query:
       select person(id as personid, name as personname)
     check res == persondata.mapIt((personid: it.id, personname: it.name))
 
-  test "query with arithmetic operator: + - * /":
+  test "arithmetic":
     let res = query:
       select person(id * 4 / 2 + 2 - 1 as id)
     check res == persondata.mapIt(int(it.id * 4 / 2 + 2 - 1))
 
-  test "query with comparison operator: equal, and bind variable":
+  test "comparison":
     let id = 1
     let res = query:
       select person(id, name, password, email, salt, status)
       where id == ?id
     check res == [persondata[id - 1]]
 
-  test "query with comparison operator: not equal":
+  test "comparison_ne":
     let id = 1
     let res = query:
       select person(id, name, password, email, salt, status)
       where id != ?id
     check res == persondata.filterIt(it.id != id)
 
-  test "query with comparison operator: great equal":
+  test "comparison_ge":
     let id = 3
     let res = query:
       select person(id, name, password, email, salt, status)
       where id >= ?id
     check res == persondata.filterIt(it.id >= id)
 
-  test "query with comparison operator: less equal":
+  test "comparison_le":
     let id = 3
     let res = query:
       select person(id, name, password, email, salt, status)
       where id <= ?id
     check res == persondata.filterIt(it.id <= id)
 
-  test "query with comparison operator: great than":
+  test "comparison_gt":
     let id = 3
     let res = query:
       select person(id, name, password, email, salt, status)
       where id > ?id
     check res == persondata.filterIt(it.id > id)
 
-  test "query with comparison operator: less than":
+  test "comparison_lt":
     let id = 3
     let res = query:
       select person(id, name, password, email, salt, status)
       where id < ?id
     check res == persondata.filterIt(it.id < id)
 
-  test "query with logical operator: not":
+  test "logical_not":
     let id = 3
     let res = query:
       select person(id, name, password, email, salt, status)
       where not (id > ?id)
     check res == persondata.filterIt(it.id <= id)
 
-  test "query with logical operator: and":
+  test "logical_and":
     let
       id1 = 2
       id2 = 4
@@ -82,7 +197,7 @@ suite fmt"test common of {backend}":
       where id >= ?id1 and id <= ?id2
     check res == persondata.filterIt(it.id >= id1 and it.id <= id2)
 
-  test "query with logical operator: or":
+  test "logical_or":
     let
       id1 = 2
       id2 = 4
@@ -91,7 +206,7 @@ suite fmt"test common of {backend}":
       where id == ?id1 or id == ?id2
     check res == persondata.filterIt(it.id == id1 or it.id == id2)
 
-  test "query with logical operator: complex conditions":
+  test "logical_complex":
     let
       id1 = 2
       id2 = 3
@@ -101,7 +216,7 @@ suite fmt"test common of {backend}":
       where id > ?id2 and (id == ?id1 or id == ?id3)
     check res == persondata.filterIt(it.id == id3)
 
-  test "query with predicate: in(between) range":
+  test "predicate_in":
     let
       id1 = 2
       id2 = 4
@@ -110,7 +225,7 @@ suite fmt"test common of {backend}":
       where id in ?id1 .. ?id2
     check res == persondata.filterIt(it.id in id1..id2)
 
-  test "query with predicate: not in(between) range":
+  test "predicate_not_in":
     let
       id1 = 2
       id2 = 4
@@ -119,21 +234,21 @@ suite fmt"test common of {backend}":
       where id notin ?id1 .. ?id2
     check res == persondata.filterIt(it.id < id1 or it.id > id2)
 
-  test "query with limit":
+  test "limit":
     let id = 1
     let res = query:
       select person(id, name, password, email, salt, status)
       limit 1
     check res == persondata[id - 1]
 
-  test "query with offset":
+  test "offset":
     let res = query:
       select person(id, name)
       limit 2
       offset 2
     check res == persondata[2..3].mapIt((it.id, it.name))
 
-  test "query result match assignment":
+  test "match_assignment":
     let id = 1
     let (name, password, email, salt, status) = query:
       select person(name, password, email, salt, status)
@@ -146,7 +261,7 @@ suite fmt"test common of {backend}":
       salt == persondata[id - 1].salt
       status == persondata[id - 1].status
 
-  test "query with group by":
+  test "groupby":
     let res = query:
       select post(author, count(id))
       groupby author
@@ -154,7 +269,7 @@ suite fmt"test common of {backend}":
     for (author, c) in res:
       check counttable[author] == c
 
-  test "query with groupby: column not in select":
+  test "groupby_aggregate":
     let author = 3
     let res = query:
       select post(count(id))
@@ -163,48 +278,48 @@ suite fmt"test common of {backend}":
     let c = postdata.mapIt(it.author).toCountTable()[author]
     check res == [c]
 
-  test "query with orderby: default":
+  test "orderby":
     let res = query:
       select person(id, name)
       orderby id
     check res == persondata.mapIt((it.id, it.name)).sortedByIt(it[0])
 
-  test "query with orderby: asc":
+  test "orderby_asc":
     let res = query:
       select person(id, name)
       orderby asc(id)
     check res == persondata.mapIt((it.id, it.name)).sortedByIt(it[0])
 
-  test "query with orderby: desc":
+  test "orderby_desc":
     let res = query:
       select person(id, name)
       orderby desc(id)
     let expected = persondata.mapIt((it.id, it.name))
-                             .sorted((x, y) => system.cmp(x[0], y[0]), Descending) 
+                            .sorted((x, y) => system.cmp(x[0], y[0]), Descending) 
     check res == expected
 
-  test "query with orderby: key is column alias":
+  test "orderby_key_select":
     let res = query:
       select person(id as personid, name)
       orderby personid
     check res == persondata.mapIt((it.id, it.name)).sortedByIt(it[0])
 
-  test "query with orderby: column not in select":
+  test "orderby_key_not_select":
     let res = query:
       select person(name)
       orderby id
     check res == persondata.sortedByIt(it.id).mapIt(it.name)
 
-  test "query with orderby: mulitple key":
+  test "orderby_mulitple":
     # test fix #30 Incorrect handling of multiple sort keys in orderby
     let res = query:
       select post(author, id)
       orderby author, desc(id)
     check res == postdata.mapIt((it.author, it.id))
-                         .sorted((x, y) => system.cmp(x[1], y[1]), Descending)
-                         .sortedByIt(it[0])
+                        .sorted((x, y) => system.cmp(x[1], y[1]), Descending)
+                        .sortedByIt(it[0])
 
-  test "query with having":
+  test "having":
     let id = 4
     let res = query:
       select post(author, count(_) as count)
@@ -216,7 +331,7 @@ suite fmt"test common of {backend}":
     {.pop.}
     check res == expected
 
-  test "query with having: aggregate function":
+  test "having_aggregate":
     let countvalue = 2
     let res = query:
       select post(author, count(id) as count)
@@ -228,7 +343,7 @@ suite fmt"test common of {backend}":
     {.pop.}
     check res.sortedByIt(it.author) == expected
 
-  test "query with having complex conditions":
+  test "having_complex":
     let
       authorid1 = 1
       authorid2 = 3
@@ -243,35 +358,35 @@ suite fmt"test common of {backend}":
     {.pop.}
     check res == expected
 
-  test "subquery with predicate in":
+  test "subquery":
     let res = query:
       select post(id)
       where author in
         (select person(id))
     check res.sortedByIt(it) == postdata.mapIt(it.id)
 
-  test "subquery Two-level nesting":
+  test "subquery_nest2":
     let
       personid1 = 1
       personid2 = 2
       expectedpost = postdata.filterIt(it.author in [personid1, personid2])
-                             .mapIt(it.id)
+                            .mapIt(it.id)
     let res = query:
       select post(id)
       where author in
         (select person(id) where id == ?personid1 or id == ?personid2)
     check res.sortedByIt(it) == expectedpost.sortedByIt(it)
 
-  test "subquery Three-level nesting":
+  test "subquery_nest3":
     let res = query:
       select thread(id)
       where id in (select post(thread) where author in
         (select person(id) where id in {1, 2}))
     check res == postdata.filterIt(it.author in [1, 2])
-                         .mapIt(it.thread)
-                         .sortedByIt(it)
+                        .mapIt(it.thread)
+                        .sortedByIt(it)
 
-  test "subquery with having":
+  test "subquery_having":
     # feature for having in subquery
     let id = 4
     let res = query:
@@ -280,7 +395,7 @@ suite fmt"test common of {backend}":
         select post(author) groupby author having author == ?id)
     check res == @[id]
       
-  test "complex query with subquery and having":
+  test "complex_query_subquery_having":
     let
       id1 = 2
       id2 = 3
@@ -299,11 +414,11 @@ suite fmt"test common of {backend}":
       {.pop.}
       postminids.add(group.min())
     let threadids = postdata.filterIt(it.author in [id1, id2] and
-                                     it.id in postminids.filterIt(it > 3))
-                             .mapIt(it.thread)
+                                    it.id in postminids.filterIt(it > 3))
+                            .mapIt(it.thread)
     check res == threadids.len()
 
-  test "query auto join person":
+  test "auto_join":
     let postid = 1
     let res = query:
       select post(author)
@@ -312,7 +427,7 @@ suite fmt"test common of {backend}":
     let (author, name) = res[0]
     check name == persondata[author - 1].name
 
-  test "query with join on":
+  test "join_on":
     # test fix #29 Cannot handle join on condition correctly
     let postid = 1
     let res = query:
@@ -322,7 +437,7 @@ suite fmt"test common of {backend}":
     let (author, name) = res[0]
     check name == persondata[author - 1].name
 
-  test "query with case when":
+  test "casewhen":
     # need more test, only number
     # has problem with string or expression in condition
     let res = query:
@@ -330,7 +445,52 @@ suite fmt"test common of {backend}":
     check res == persondata.mapIt((
                     name: it.name,
                     pid: if it.id == 1: 10 elif it.id == 2: 20 else: 30))
-      
+
+  test "produce_json":
+    # test fix #27 Error: type mismatch: got <typeof(nil)>
+    let threadjson = query:
+      select thread(id, name)
+      produce json
+    let expected = threaddata.map do (it: tuple) -> JsonNode:
+      result = newJObject()
+      result["id"] = %it.id
+      result["name"] = %it.name
+    check threadjson == %expected
+
+  test "produce_nim":
+    let threadnim = query:
+      select thread(id, name)
+      produce nim
+    check threadnim == threaddata.mapIt((it.id, it.name))
+
+  test "tryquery":
+    # unknow use, only not raise dbError?
+    let res = tryQuery:
+      select thread(id)
+    check res == threaddata.mapIt(it.id)
+
+  test "createproc":
+    createProc getAllThreadIds:
+      select thread(id)
+    check db.getAllThreadIds() == threaddata.mapIt(it.id)
+
+  test "createiter":
+    createIter allThreadIdsIter:
+      select thread(id)
+    {.push warning[deprecated]: off.}
+    let res = lc[id | (id <- db.allThreadIdsIter), int]
+    {.pop.}
+    check res.sortedByIt(it) == threaddata.mapIt(it.id)
+
+  test "where_json":
+    let
+      id = 1
+      p = %*{"id": id}
+    let res = query:
+      select person(id)
+      where id == %p["id"]
+    check res == [id]
+
   test "update value with ||":
     let
       id = 3
@@ -371,51 +531,6 @@ suite fmt"test common of {backend}":
         returning id
       check id == expectedid
 
-  test "query with produce json":
-    # test fix #27 Error: type mismatch: got <typeof(nil)>
-    let threadjson = query:
-      select thread(id, name)
-      produce json
-    let expected = threaddata.map do (it: tuple) -> JsonNode:
-      result = newJObject()
-      result["id"] = %it.id
-      result["name"] = %it.name
-    check threadjson == %expected
-
-  test "query with default produce nim":
-    let threadnim = query:
-      select thread(id, name)
-      produce nim
-    check threadnim == threaddata.mapIt((it.id, it.name))
-
-  test "tryQuery":
-    # unknow use, only not raise dbError?
-    let res = tryQuery:
-      select thread(id)
-    check res == threaddata.mapIt(it.id)
-
-  test "createProc":
-    createProc getAllThreadIds:
-      select thread(id)
-    check db.getAllThreadIds() == threaddata.mapIt(it.id)
-
-  test "createIter":
-    createIter allThreadIdsIter:
-      select thread(id)
-    {.push warning[deprecated]: off.}
-    let res = lc[id | (id <- db.allThreadIdsIter), int]
-    {.pop.}
-    check res.sortedByIt(it) == threaddata.mapIt(it.id)
-
-  test "query condition bind json object":
-    let
-      id = 1
-      p = %*{"id": id}
-    let res = query:
-      select person(id)
-      where id == %p["id"]
-    check res == [id]
-
   test "insert with json object":
     let
       id = 7
@@ -445,7 +560,7 @@ suite fmt"test common of {backend}":
     let id = 8
     query:
       insert antibot(id = ?id, ip = "", answer = !!"'raw sql'",
-                     created = !!"CURRENT_TIMESTAMP")
+                    created = !!"CURRENT_TIMESTAMP")
     let res = query:
       select antibot(_)
       where id == ?id

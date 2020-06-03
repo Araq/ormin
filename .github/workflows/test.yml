@@ -9,6 +9,7 @@ jobs:
       matrix:
         nim:
           - 1.0.6
+          - devel
     name: Test on nim ${{ matrix.nim }}
     steps:
     - name: Checkout source code

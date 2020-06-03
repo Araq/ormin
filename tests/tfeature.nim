@@ -1,6 +1,6 @@
-import unittest, strformat, sequtils, algorithm, sugar, json, tables, random, os
+import unittest, strformat, sequtils, algorithm, sugar, json, tables, random, os, sugar
 import ../ormin
-import ./utils
+import ./utils, ./compat
 
 let testDir = currentSourcePath.parentDir()
 
@@ -325,10 +325,9 @@ suite "query":
       select post(author, count(_) as count)
       groupby author
       having author == ?id
-    let ct = postdata.mapIt(it.author).toCountTable()
-    {.push warning[deprecated]: off.}
-    let expected = lc[p | (p <- ct.pairs(), p[0] == id), tuple[author, count: int]]
-    {.pop.}
+    let expected = collect(newSeq):
+      for p in postdata.mapIt(it.author).toCountTable().pairs():
+        if p[0] == id: p
     check res == expected
 
   test "having_aggregate":
@@ -337,11 +336,10 @@ suite "query":
       select post(author, count(id) as count)
       groupby author
       having count(id) >= ?countvalue
-    let ct = postdata.mapIt(it.author).toCountTable()
-    {.push warning[deprecated]: off.}
-    let expected = lc[p | (p <- ct.pairs(), p[1] >= countvalue), tuple[author, count: int]]
-    {.pop.}
-    check res.sortedByIt(it.author) == expected
+    let expected = collect(newSeq):
+      for p in postdata.mapIt(it.author).toCountTable().pairs():
+        if p[1] >= countvalue: p
+    check res.sortedByIt(it[0])  == expected.sortedByIt(it[0])
 
   test "having_complex":
     let
@@ -352,10 +350,9 @@ suite "query":
       select post(author, count(id) as count)
       groupby author
       having count(id) >= ?countvalue and (author == ?authorid1 or author == ?authorid2)
-    let ct = postdata.mapIt(it.author).toCountTable()
-    {.push warning[deprecated]: off.}
-    let expected = lc[p | (p <- ct.pairs(), (p[0] in [authorid1, authorid2] and p[1] >= countvalue)), tuple[author, count: int]]
-    {.pop.}
+    let expected = collect(newSeq):
+      for p in postdata.mapIt(it.author).toCountTable().pairs():
+        if p[0] in [authorid1, authorid2] and p[1] >= countvalue: p
     check res == expected
 
   test "subquery":
@@ -409,9 +406,9 @@ suite "query":
     let threadinpost = postdata.mapIt(it.thread).deduplicate().sortedByIt(it)
     var postminids: seq[int]    
     for id in threadinpost:
-      {.push warning[deprecated]: off.}
-      let group = lc[p.id | (p <- postdata, p.thread == id), int]
-      {.pop.}
+      let group = collect(newSeq):
+        for p in postdata:
+          if p.thread == id: p.id
       postminids.add(group.min())
     let threadids = postdata.filterIt(it.author in [id1, id2] and
                                     it.id in postminids.filterIt(it > 3))
@@ -477,9 +474,9 @@ suite "query":
   test "createiter":
     createIter allThreadIdsIter:
       select thread(id)
-    {.push warning[deprecated]: off.}
-    let res = lc[id | (id <- db.allThreadIdsIter), int]
-    {.pop.}
+    let res = collect(newSeq):
+      for id in db.allThreadIdsIter:
+        id
     check res.sortedByIt(it) == threaddata.mapIt(it.id)
 
   test "where_json":

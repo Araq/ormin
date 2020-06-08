@@ -15,7 +15,8 @@ else:
   const backend = DbBackend.sqlite
   importModel(backend, "model_sqlite")
   const sqlFileName = "model_sqlite.sql"
-  let db {.global.} = open(":memory:", "", "", "")
+  # let db {.global.} = open(":memory:", "", "", "")
+  let db {.global.} = open("test.db", "", "", "")
 
 let
   testDir = currentSourcePath.parentDir()
@@ -23,9 +24,9 @@ let
 
 
 let
-  min = 1
+  min = -3
   max = 3
-  seqs = toSeq(min..max)
+  serial_int_seqs = [(1, min), (2, 1), (3, 2), (4, max)]
 
 suite &"Test common database types and functions of {backend}":
   discard
@@ -36,17 +37,17 @@ suite "serial_insert":
     db.createTable(sqlFile, "tb_serial")
 
   test "insert":
-    for i in seqs:
+    for i in serial_int_seqs:
       query:
-        insert tb_serial(typinteger = ?i)
-    check db.getValue(sql"select count(*) from tb_serial") == $seqs.len
+        insert tb_serial(typinteger = ?i[1])
+    check db.getValue(sql"select count(*) from tb_serial") == $serial_int_seqs.len
 
   test "json":
-    for i in seqs:
-      let v = %*{"typinteger": i}
+    for i in serial_int_seqs:
+      let v = %*{"typinteger": i[1]}
       query:
         insert tb_serial(typinteger = %v["typinteger"])
-    check db.getValue(sql"select count(*) from tb_serial") == $seqs.len
+    check db.getValue(sql"select count(*) from tb_serial") == $serial_int_seqs.len
 
 
 suite "serial":
@@ -54,14 +55,14 @@ suite "serial":
   db.createTable(sqlFile, "tb_serial")
 
   let insertSql = sql"insert into tb_serial(typinteger) values (?)"
-  for i in seqs:
-    db.exec(insertSql, i)  
-  doAssert db.getValue(sql"select count(*) from tb_serial") == $seqs.len
+  for (_, v) in serial_int_seqs:
+    db.exec(insertSql, v) 
+  doAssert db.getValue(sql"select count(*) from tb_serial") == $serial_int_seqs.len
 
   test "query":
     let res = query:
       select tb_serial(typserial, typinteger)
-    check res == seqs.mapIt((it, it))
+    check res == serial_int_seqs
 
   test "where":
     let
@@ -69,28 +70,28 @@ suite "serial":
       res = query:
         select tb_serial(typserial, typinteger)
         where typserial == ?id
-    check res == seqs.filterIt(it == id).mapIt((it, it))
+    check res == serial_int_seqs.filterIt(it[0] == id)
 
   test "json":
     let res = query:
       select tb_serial(typserial, typinteger)
       produce json
-    check res == %*seqs.mapIt(%*{"typserial": it, "typinteger": it})
+    check res == %*serial_int_seqs.mapIt(%*{"typserial": it[0], "typinteger": it[1]})
 
   test "count":
     let res = query:
       select tb_serial(count(_))
-    check res[0] == seqs.len
+    check res[0] == serial_int_seqs.len
 
   test "sum":
     let res = query:
       select tb_serial(sum(typinteger))
-    check res[0] == seqs.sum()
+    check res[0] == serial_int_seqs.mapIt(it[1]).sum()
 
   test "avg":
     let res = query:
       select tb_serial(avg(typinteger))
-    check res[0] == seqs.sum() / seqs.len()
+    check res[0] == serial_int_seqs.mapIt(it[1]).sum() / serial_int_seqs.len()
 
   test "min":
     let res = query:
@@ -102,6 +103,8 @@ suite "serial":
       select tb_serial(max(typinteger))
     check res[0] == max
 
+
+let seqs = toSeq(1..3)
 
 suite "boolean_insert":
   setup:

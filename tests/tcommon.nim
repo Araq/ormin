@@ -103,6 +103,11 @@ suite "serial":
       select tb_serial(max(typinteger))
     check res[0] == max
 
+  test "abs":
+    let res = query:
+      select tb_serial(abs(typinteger))
+    check res == serial_int_seqs.mapIt(abs(it[1]))
+
 
 let seqs = toSeq(1..3)
 
@@ -164,7 +169,7 @@ suite "boolean":
     check res == %*seqs.mapIt(%*{"typboolean": toBool(it)})
 
 
-let fs = [3.14, 2.56, 10.45]
+let fs = [-3.14, 2.56, 10.45]
 
 suite "float_insert":
   setup:
@@ -210,3 +215,13 @@ suite "float":
       select tb_float(typfloat)
       produce json
     check res == %*fs.mapIt(%*{"typfloat": it})
+
+  test "abs":
+    let res = query:
+      select tb_float(abs(typfloat))
+    check res == fs.mapIt(abs(it))
+
+  test "round":
+    let res = query:
+      select tb_float(round(typfloat, 0))
+    check res == fs.mapIt(round(it))

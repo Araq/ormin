@@ -8,7 +8,11 @@ create table if not exists tb_boolean(
 );
 
 create table if not exists tb_float(
-  typfloat float not null
+  typfloat real not null
+);
+
+create table if not exists tb_string(
+  typstring varchar not null
 );
 
 create table if not exists tb_timestamp(

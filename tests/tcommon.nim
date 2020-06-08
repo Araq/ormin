@@ -1,4 +1,4 @@
-import unittest, json, strutils, strformat, sequtils, macros, times, os, math
+import unittest, json, strutils, strformat, sequtils, macros, times, os, math, unicode
 import ormin
 import ./utils
 
@@ -221,7 +221,76 @@ suite "float":
       select tb_float(abs(typfloat))
     check res == fs.mapIt(abs(it))
 
-  test "round":
+
+let ss = ["one", "Two", "three", "第四"]
+
+suite "string_insert":
+  setup:
+    db.dropTable(sqlFile, "tb_string")
+    db.createTable(sqlFile, "tb_string")
+
+  test "insert":
+    for v in ss:
+      query:
+        insert tb_string(typstring = ?v)
+    check db.getValue(sql"select count(*) from tb_string") == $ss.len
+
+  test "json":
+    for v in ss:
+      let j = %*{"typstring": v}
+      query:
+        insert tb_string(typstring = %j["typstring"])
+    check db.getValue(sql"select count(*) from tb_string") == $ss.len
+
+suite "string":
+  db.dropTable(sqlFile, "tb_string")
+  db.createTable(sqlFile, "tb_string")
+
+  let insertsql = sql"insert into tb_string(typstring) values (?)"
+  for v in ss:
+    db.exec(insertsql, v)
+  doAssert db.getValue(sql"select count(*) from tb_string") == $ss.len
+
+  test "query":
     let res = query:
-      select tb_float(round(typfloat, 0))
-    check res == fs.mapIt(round(it))
+      select tb_string(typstring)
+    check res == ss
+
+  test "where":
+    let res = query:
+      select tb_string(typstring)
+      where typstring == ?ss[0]
+    check res[0] == ss[0]
+
+  test "json":
+    let res = query:
+      select tb_string(typstring)
+      produce json
+    check res == %*ss.mapIt(%*{"typstring": it})
+
+  test "concat_op":
+    let
+      s = "typstring: "
+    let res = query:
+      select tb_string(?s & typstring)
+    check res == ss.mapIt(s & it)
+    
+  test "length":
+    let res = query:
+      select tb_string(length(typstring))
+    check res == ss.mapIt(it.runeLen)
+
+  test "lower":
+    let res = query:
+      select tb_string(lower(typstring))
+    check res == ss.mapIt(it.toLowerAscii)
+
+  test "upper":
+    let res = query:
+      select tb_string(upper(typstring))
+    check res == ss.mapIt(it.toUpperAscii)
+
+  test "replace":
+    let res = query:
+      select tb_string(replace(typstring, "e", "o"))
+    check res == ss.mapIt(it.replace("e", "o"))

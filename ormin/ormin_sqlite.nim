@@ -34,7 +34,7 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
   when t is int or t is int64 or t is bool:
     if bind_int64(s, idx.cint, x.int64) != SQLITE_OK: dbError(db)
   elif t is string:
-    if bind_blob(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
+    if bind_text(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
       dbError(db)
   elif t is float64:
     if bind_double(s, idx.cint, x) != SQLITE_OK:

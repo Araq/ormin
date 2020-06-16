@@ -1,4 +1,4 @@
-import unittest, sqlite3, json, times
+import unittest, sqlite3, json, times, sequtils
 from db_sqlite import exec, getValue
 import ormin
 import ./utils

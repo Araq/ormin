@@ -1,4 +1,4 @@
-import unittest, postgres, json, strutils, macros, times, os
+import unittest, postgres, json, strutils, macros, times, os, sequtils
 import ormin
 from db_postgres import exec, getValue
 import ./utils

@@ -8,9 +8,13 @@ export db_common
 
 type
   DbConn* = PSqlite3  ## encapsulates a database connection
-  varchar* = string
-  integer* = int
-  timestamp* = DateTime
+  
+  varcharType* = string
+  intType* = int
+  floatType* = float
+  boolType* = bool
+  timestampType* = DateTime
+  jsonType* = JsonNode
 
 var jsonTimeFormat* = "yyyy-MM-dd HH:mm:ss"
 
@@ -46,7 +50,11 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
       x.utc().format("yyyy-MM-dd HH:mm:ss")
 
     if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_STATIC) != SQLITE_OK:
-      dbError(db)    
+      dbError(db)
+  elif t is JsonNode:
+    let xx = $x
+    if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_STATIC) != SQLITE_OK:
+      dbError(db)  
   else:
     {.error: "type mismatch for query argument at position " & $idx.}
 
@@ -142,6 +150,11 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: DateTime;
   else:
     dest = parse(src, "yyyy-MM-dd HH:mm:ss\'.\'fff", utc())
 
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: JsonNode;
+                     t: typedesc; name: string) =
+  let src = column_text(s, idx.cint)
+  dest = parseJson($src)
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -183,6 +196,11 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   var dt: DateTime
   bindResult(db, s, idx, dt, t, name)
   obj[name] = newJString(format(dt, jsonTimeFormat))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[JsonNode]; name: string) =
+  let src = column_text(s, idx.cint)
+  obj[name] = parseJson($src)
 
 template startQuery*(db: DbConn; s: PStmt) = discard "nothing to do"
 

@@ -8,10 +8,13 @@ type
   DbConn* = PPGconn    ## encapsulates a database connection
   PStmt = string ## a identifier for the prepared queries
 
-  varchar* = string
-  integer* = int
-  timestamp* = Datetime
-  serial* = int
+  varcharType* = string
+  intType* = int
+  floatType* = float
+  boolType* = bool
+  timestampType* = Datetime
+  serialType* = int
+  jsonType* = JsonNode
 
 var jsonTimeFormat* = "yyyy-MM-dd HH:mm:ss"
 
@@ -153,6 +156,10 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var DateTime;
       let dtstr = src & '0'.repeat(7-src.len+i)
       dest = parse(dtstr, "yyyy-MM-dd HH:mm:ss\'.\'ffffff")
 
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: JsonNode;
+                     t: typedesc; name: string) =
+  dest = parseJson($pqgetvalue(queryResult, queryI, idx.cint))
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -192,6 +199,11 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   bindResult(db, s, idx, dt, t, name)
   obj[name] = newJString(format(dt, jsonTimeFormat))
   
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[JsonNode]; name: string) =
+  let src = pqgetvalue(queryResult, queryI, idx.cint)
+  obj[name] = parseJson($src)  
+
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):
     var queryResult {.inject.} = pqexecPrepared(db, s, int32(parr.len),

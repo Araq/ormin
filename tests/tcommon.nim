@@ -294,3 +294,41 @@ suite "string":
     let res = query:
       select tb_string(replace(typstring, "e", "o"))
     check res == ss.mapIt(it.replace("e", "o"))
+    
+
+let js = [
+  %*{"name": "tom", "age": 30},
+  %*{"name": "bob", "age": 35},
+  %*{"name": "jack", "age": 23} 
+]
+
+suite "insert_json":
+  setup:
+    db.dropTable(sqlFile, "tb_json")
+    db.createTable(sqlFile, "tb_json")
+
+  test "insert":
+    for j in js:
+      query:
+        insert tb_json(typjson = ?j)
+    check db.getValue(sql"select count(*) from tb_json") == $js.len
+
+suite "json":
+  db.dropTable(sqlFile, "tb_json")
+  db.createTable(sqlFile, "tb_json")
+  
+  let insertSql = sql"insert into tb_json(typjson) values (?)"
+  for j in js:
+    db.exec(insertSql, j)
+  doAssert db.getValue(sql"select count(*) from tb_json") == $js.len
+
+  test "query":
+    let res = query:
+      select tb_json(typjson)
+    check res == js
+
+  test "json":
+    let res = query:
+      select tb_json(typjson)
+      produce json
+    check res == %*js.mapIt(%*{"typjson": it})

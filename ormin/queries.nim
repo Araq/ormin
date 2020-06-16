@@ -142,7 +142,7 @@ proc checkCompatibleSet(a, b: DbType; n: NimNode) =
   discard "too implement; might require a richer type system"
 
 proc toNimType(t: DbTypeKind): NimNode {.compileTime.} =
-  let name = ($t).substr(2).toLowerAscii
+  let name = ($t).substr(2).toLowerAscii & "Type"
   result = ident(name)
 
 proc toNimType(t: DbType): NimNode {.compileTime.} = toNimType(t.kind)

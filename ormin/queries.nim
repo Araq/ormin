@@ -28,7 +28,12 @@ var
     Function(name: "avg", arity: 1, typ: dbFloat),
     Function(name: "sum", arity: 1, typ: dbUnknown),
     Function(name: "isnull", arity: 3, typ: dbUnknown),
-    Function(name: "concat", arity: -1, typ: dbVarchar)
+    Function(name: "concat", arity: -1, typ: dbVarchar),
+    Function(name: "abs", arity: 1, typ: dbUnknown),
+    Function(name: "length", arity: 1, typ: dbInt),
+    Function(name: "lower", arity: 1, typ: dbVarchar),
+    Function(name: "upper", arity: 1, typ: dbVarchar),
+    Function(name: "replace", arity: 3, typ: dbVarchar)
   ]
 
 type
@@ -203,7 +208,8 @@ proc cond(n: NimNode; q: var string; params: var Params;
   of nnkStrLit, nnkRStrLit, nnkTripleStrLit:
     result = expected
     if result.kind == dbUnknown:
-      error "cannot infer the type of the literal", n
+      # error "cannot infer the type of the literal", n
+      result.kind = dbVarchar
     if result.kind == dbBlob:
       q.add(escape(n.strVal, "b'", "'"))
     else:
@@ -269,7 +275,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
         checkCompatible result, expected, n
     of "&":
       let a = cond(n[1], q, params, DbType(kind: dbVarchar), qb)
-      q.add " || "
+      q.add " || "
       let b = cond(n[2], q, params, a, qb)
       checkCompatible a, b, n
       result = DbType(kind: dbVarchar)

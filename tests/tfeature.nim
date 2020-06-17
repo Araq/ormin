@@ -479,30 +479,21 @@ suite "query":
         id
     check res.sortedByIt(it) == threaddata.mapIt(it.id)
 
-  test "where_json":
-    let
-      id = 1
-      p = %*{"id": id}
-    let res = query:
-      select person(id)
-      where id == %p["id"]
-    check res == [id]
-
-  test "update value with ||":
+  test "update_concat_op":
     let
       id = 3
       name = persondata[id - 1].name
       appendstr = "updated"
       nameupdated = name & appendstr
     query:
-      update person(name = name || ?appendstr)
+      update person(name = name & ?appendstr)
       where id == ?id
     let res = query:
       select person(name)
       where id == ?id
     check res[0] == nameupdated
 
-  test "delete one record":
+  test "delete_one":
     # test fix #14: delete not return value
     let id = 1
     query:
@@ -513,14 +504,14 @@ suite "query":
       where id == ?id
     check res == []
 
-  test "delete all data":
+  test "delete_all":
     query:
       delete antibot
     let res = query:
       select antibot(_)
     check res == []
 
-  test "insert with return id":
+  test "insert_return_id":
     # test fix #28 returning id fail under postgresql 
       let expectedid = 6
       let id = query:
@@ -528,7 +519,16 @@ suite "query":
         returning id
       check id == expectedid
 
-  test "insert with json object":
+  test "where_json":
+    let
+      id = 1
+      p = %*{"id": id}
+    let res = query:
+      select person(id)
+      where id == %p["id"]
+    check res == [id]
+
+  test "insert_json":
     let
       id = 7
       answer = "json answer"
@@ -540,7 +540,7 @@ suite "query":
       where id == ?id
     check res[0] == answer
 
-  test "update with json object":
+  test "update_json":
     let
       id = 3
       name = "json"
@@ -553,7 +553,7 @@ suite "query":
       where id == ?id
     check res[0] == name
   
-  test "insert with raw sql using: !!":
+  test "insert_rawsql":
     let id = 8
     query:
       insert antibot(id = ?id, ip = "", answer = !!"'raw sql'",
@@ -563,7 +563,7 @@ suite "query":
       where id == ?id
     check res[0].answer == "raw sql"
 
-  test "update with raw sql using: !!":
+  test "update_rawsql":
     let id = 3
     let res = query:
       select person(name)

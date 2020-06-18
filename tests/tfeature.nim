@@ -1,6 +1,8 @@
 import unittest, strformat, sequtils, algorithm, sugar, json, tables, random, os, sugar
 import ../ormin
-import ./utils, ./compat
+import ./utils
+when NimVersion < "1.2.0": import ./compat
+
 
 let testDir = currentSourcePath.parentDir()
 

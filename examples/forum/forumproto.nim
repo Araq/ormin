@@ -12,9 +12,9 @@ protocol "forumclient.nim":
     else:
       type kstring = string
     type
-      inet = kstring
-      varchar = kstring
-      timestamp = kstring
+      inetType = kstring
+      varcharType = kstring
+      timestampType = kstring
   server:
     query:
       delete antibot

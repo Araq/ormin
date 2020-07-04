@@ -17,9 +17,10 @@ protocol "chatclient.nim":
     when not defined(js):
       type kstring = string
     type
-      inet = kstring
-      varchar = kstring
-      timestamp = kstring
+      inetType = kstring
+      varcharType = kstring
+      timestampType = kstring
+      intType = int
 
 
   server "get recent messages":

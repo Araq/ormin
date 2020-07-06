@@ -1,6 +1,11 @@
-import database
+import db_sqlite, os, strutils
 
-var db = newDatabase()
-db.setup()
+let db {.global.} = open("tweeter.db", "", "", "")
+
+let sqlFile = readFile(currentSourcePath.parentDir() / "tweeter_model.sql")
+for t in sqlFile.split(';'):
+  if t.strip() != "":
+    db.exec(sql(t))
+
 echo("Database created successfully!")
 db.close()

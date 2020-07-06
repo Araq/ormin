@@ -330,7 +330,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       q.add op
       return
     for f in functions:
-      if f.name == op:
+      if f.name.toLowerAscii() == op.toLowerAscii():
         if f.arity == n.len-1 or (f.arity == -1 and n.len > 1):
           q.add op
           q.add "("

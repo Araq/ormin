@@ -1,5 +1,6 @@
 #? stdtmpl(subsChar = '$', metaChar = '#')
-#import xmltree, json
+#import xmltree
+#import ../model
 #import user
 #
 #proc `$!`(text: string): string = escape(text)
@@ -33,7 +34,7 @@
 </div>
 #end proc
 #
-#proc renderTimeline*(username: string, messages: JsonNode): string =
+#proc renderTimeline*(username: string, messages: openArray[Message]): string =
 #  result = ""
 <div id="user">
   <h1>${$!username} timeline</h1>

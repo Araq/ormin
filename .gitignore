@@ -18,3 +18,5 @@ examples/forum/forum_model.nim
 examples/forum/forumclient.nim
 examples/forum/forum
 examples/forum/forumproto
+examples/tweeter/src/createdatabase
+examples/tweeter/src/tweeter

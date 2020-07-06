@@ -10,7 +10,7 @@ jobs:
         nim:
           - 1.0.6
           - stable
-          - devel
+          # - devel
     name: Test on nim ${{ matrix.nim }}
     steps:
     - name: Checkout source code
@@ -48,6 +48,7 @@ jobs:
         nimble refresh
         nimble install -y
         nimble install karax -y
+        nimble install jester -y
       
     - name: Run test
       run: nimble test

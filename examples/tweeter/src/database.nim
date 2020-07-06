@@ -1,4 +1,5 @@
-import times, strutils, sequtils, algorithm
+import times, strutils, strformat, sequtils
+from db_sqlite import instantRows, `[]`
 import ormin
 import model
 
@@ -37,14 +38,14 @@ proc follow*(follower, user: User) =
     insert following(follower = ?follower.username, followed_user = ?user.username)
 
 proc findMessage*(usernames: openArray[string], limit = 10): seq[Message] =
-  var messages = newSeq[Message]()
+  result = @[]
   if usernames.len == 0: return
-  for name in usernames:
-    let res = query:
-      select message(username, time, msg)
-      where username == ?name
-    messages &= res
-  if messages.len > limit: 
-    return messages.sortedByIt(it.time)[0 ..< limit]
-  else:
-    return messages.sortedByIt(it.time)
+  var whereClause = "WHERE "
+  for i in 0 ..< usernames.len:
+    whereClause.add("trim(username) = ?") 
+    if i < usernames.len - 1:
+      whereClause.add(" or ")
+  
+  let s = &"SELECT username, time, msg FROM Message {whereClause} ORDER BY time DESC LIMIT {limit}"
+  for row in db.instantRows(sql(s), usernames):
+    result.add((username: row[0], time: row[1].parseInt, msg: row[2])) 

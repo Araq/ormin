@@ -28,3 +28,4 @@ task buildexamples, "Build examples: chat and forum":
   selfExec "js examples/chat/frontend"
   selfExec "c examples/forum/forum"
   selfExec "c examples/forum/forumproto"
+  selfExec "c examples/tweeter/src/tweeter"

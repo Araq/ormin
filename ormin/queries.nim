@@ -219,6 +219,11 @@ proc cond(n: NimNode; q: var string; params: var Params;
     if result.kind == dbUnknown:
       result.kind = dbInt
     q.add $n.intVal
+  of nnkFloatLit:
+    result = expected
+    if result.kind == dbUnknown:
+      result.kind = dbFloat
+    q.add $n.floatVal
   of nnkInfix:
     let op = $n[0]
     case op

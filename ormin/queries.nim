@@ -335,7 +335,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
           q.add op
           q.add "("
           for i in 1..<n.len:
-            result = cond(n[i], q, params, DbType(kind: dbUnknown), qb)
+            result = cond(n[i], q, params, DbType(kind: f.typ), qb)
             if i < n.len-1: q.add ", "
           if f.typ != dbUnknown: result.kind = f.typ
           q.add ")"

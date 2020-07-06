@@ -16,7 +16,7 @@
 <div id="user">
   <h1>${user.username}</h1>
   <span>Following: ${$user.following.len}</span>
-  #if user.username notin currentUser.following:
+  #if user.username notin currentUser.following and user.username != currentUser.username:
   <form action="follow" method="post">
     <input type="hidden" name="follower" value="${currentUser.username}">
     <input type="hidden" name="target" value="${user.username}">

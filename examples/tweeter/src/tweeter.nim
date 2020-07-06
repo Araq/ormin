@@ -2,9 +2,6 @@ import asyncdispatch, times
 import jester
 import database, model, views/[user, general]
 
-# importModel(DbBackend.sqlite, "tweeter_model")
-# var db {.global.} = open("tweeter.db", "", "", "")
-
 proc userLogin(request: Request, user: var User): bool =
   if request.cookies.hasKey("username"):
     let username = request.cookies["username"]

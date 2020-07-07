@@ -47,8 +47,8 @@ template startBindings*(s: PStmt; n: int) {.dirty.} =
   var parr: array[n, cstring]
 
 template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
-  when not (x is t):
-    {.error: "type mismatch for query argument at position " & $idx.}
+  # when not (x is t):
+  #   {.error: "type mismatch for query argument at position " & $idx.}
   when t is DateTime:
     let xx = x.format("yyyy-MM-dd HH:mm:ss\'.\'ffffffzzzz")
     pparams[idx-1] = $xx

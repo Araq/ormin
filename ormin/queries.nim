@@ -967,8 +967,8 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   for b in query:
     if b.kind == nnkCommand: queryh(b, q)
     else: error "illformed query", b
-  if q.kind != qkSelect:
-    error "query must be a 'select'", query
+  if q.kind notin {qkSelect, qkJoin}:
+    error "query must be a 'select' or 'join'", query
   let sql = queryAsString(q)
   result = generateRoutine(name, q, sql, k)
   when defined(debugOrminDsl):

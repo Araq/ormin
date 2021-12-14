@@ -184,7 +184,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = lookupColumnInEnv(n, q, params, expected, qb)
   of nnkDotExpr:
     let t = $n[0]
-    let a = $n[0]
+    let a = $n[1]
     escIdent(q, t)
     q.add '.'
     escIdent(q, a)

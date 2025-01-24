@@ -1,5 +1,11 @@
-ormin
+ormin2
 =====
+
+This is Ormin, maintained to work with nim version >=2.0.0
+
+Please refer to https://github.com/Araq/ormin if you are using nim version < 2.0.0
+
+
 
 Prepared SQL statement generator for Nim. A lightweight ORM.
 

@@ -1,14 +1,15 @@
 
 {.deadCodeElim: on.}
 
-import sqlite3, json, times
+import json, times
 
-import db_common
+import db_connector/db_common
+import db_connector/sqlite3
 export db_common
 
 type
   DbConn* = PSqlite3  ## encapsulates a database connection
-  
+
   varcharType* = string
   intType* = int
   floatType* = float
@@ -54,7 +55,7 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
   elif t is JsonNode:
     let xx = $x
     if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_STATIC) != SQLITE_OK:
-      dbError(db)  
+      dbError(db)
   else:
     {.error: "type mismatch for query argument at position " & $idx.}
 

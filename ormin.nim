@@ -16,7 +16,7 @@ template importModel*(backend: DbBackend; filename: string) {.dirty.} =
 
   const dbBackend = backend
 
-  import db_common
+  import db_connector/db_common
 
   when dbBackend == DbBackend.sqlite:
     import ormin/ormin_sqlite

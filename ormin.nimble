@@ -1,13 +1,12 @@
 # Package
 
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "Araq"
-description   = "Prepared SQL statement generator. A lightweight ORM."
+description   = "ormin for nim version >= 2.0.0."
 license       = "MIT"
 
 # Dependencies
-
-requires "nim >= 0.17.2"
+requires "nim >= 2.0.0"
 requires "websocket >= 0.2.2"
 
 bin = @["tools/ormin_importer"]

@@ -8,6 +8,7 @@ license       = "MIT"
 # Dependencies
 requires "nim >= 2.0.0"
 requires "websocket >= 0.2.2"
+requires "db_connector >= 0.1.0"
 
 bin = @["tools/ormin_importer"]
 

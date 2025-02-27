@@ -1,4 +1,4 @@
-ormin2
+ormin
 =====
 
 This is ormin, maintained to work with nim version >=2.0.0

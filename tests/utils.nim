@@ -1,6 +1,6 @@
-import db_common, strutils, strformat, re
-from db_postgres import nil
-from db_sqlite import nil
+import db_connector/db_common, strutils, strformat, re
+from db_connector/db_postgres import nil
+from db_connector/db_sqlite import nil
 
 type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 

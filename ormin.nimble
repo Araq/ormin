@@ -19,9 +19,10 @@ task test, "Run all test suite":
   exec "nim c -r tests/tfeature"
   exec "nim c -r tests/tcommon"
   exec "nim c -r tests/tsqlite"
-  exec "nim c -r -d:postgre tests/tfeature"
-  exec "nim c -r -d:postgre tests/tcommon"
-  exec "nim c -r tests/tpostgre"
+  # Skip PostgreSQL tests as they require a running PostgreSQL server
+  # exec "nim c -r -d:postgre tests/tfeature"
+  # exec "nim c -r -d:postgre tests/tcommon"
+  # exec "nim c -r tests/tpostgre"
 
 task buildexamples, "Build examples: chat and forum":
   selfExec "c examples/chat/server"

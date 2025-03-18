@@ -1,6 +1,6 @@
 import times, strutils, strformat, sequtils
 from db_connector/db_sqlite import instantRows, `[]`
-import ormin
+import ../../../ormin
 import model
 
 importModel(DbBackend.sqlite, "tweeter_model")

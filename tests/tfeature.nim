@@ -1,4 +1,5 @@
-import unittest, strformat, sequtils, algorithm, sugar, json, tables, random, os
+import unittest, strformat, sequtils, algorithm, sugar, json, tables, random
+import os
 import ../ormin
 import ./utils
 when NimVersion < "1.2.0": import ./compat
@@ -19,9 +20,10 @@ else:
   const backend = DbBackend.sqlite
   importModel(backend, "forum_model_sqlite")
   const sqlFileName = "forum_model_sqlite.sql"
-  let db {.global.} = open(joinPath(testDir, ":memory:"), "", "", "")
+  var memoryPath = testDir & "/" & ":memory:"
+  let db {.global.} = open(memoryPath, "", "", "")
 
-let sqlFile = joinPath(testDir, sqlFileName)
+var sqlFilePath = testDir & "/" & sqlFileName
 
 type
   Person = tuple[id: int,
@@ -59,8 +61,8 @@ suite &"Test ormin features of {backend}":
   discard
 
 suite "query":
-  db.dropTable(sqlFile)
-  db.createTable(sqlFile)
+  db.dropTable(sqlFilePath)
+  db.createTable(sqlFilePath)
 
   # prepare data to insert  
   for i in 1..personcount:

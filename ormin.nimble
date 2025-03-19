@@ -2,7 +2,7 @@
 
 version       = "0.2.0"
 author        = "Araq"
-description   = "ormin for nim version >= 2.0.0."
+description = "Prepared SQL statement generator. A lightweight ORM."
 license       = "MIT"
 
 # Dependencies

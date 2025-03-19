@@ -1,7 +1,6 @@
+import strutils, db_connector/postgres, json, times
 
-import strutils, postgres, json, times
-
-import db_common
+import db_connector/db_common
 export db_common
 
 type

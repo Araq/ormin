@@ -1,4 +1,5 @@
-import unittest, strformat, sequtils, algorithm, sugar, json, tables, random, os, sugar
+import unittest, strformat, sequtils, algorithm, sugar, json, tables, random
+import os
 import ../ormin
 import ./utils
 when NimVersion < "1.2.0": import ./compat
@@ -7,21 +8,22 @@ when NimVersion < "1.2.0": import ./compat
 let testDir = currentSourcePath.parentDir()
 
 when defined postgre:
-  from db_postgres import exec, getValue
+  from db_connector/db_postgres import exec, getValue
 
   const backend = DbBackend.postgre
   importModel(backend, "forum_model_postgres")
   const sqlFileName = "forum_model_postgres.sql"
   let db {.global.} = open("localhost", "test", "test", "test")
 else:
-  from db_sqlite import exec, getValue
+  from db_connector/db_sqlite import exec, getValue
 
   const backend = DbBackend.sqlite
   importModel(backend, "forum_model_sqlite")
   const sqlFileName = "forum_model_sqlite.sql"
-  let db {.global.} = open(testDir / ":memory:", "", "", "")
+  var memoryPath = testDir & "/" & ":memory:"
+  let db {.global.} = open(memoryPath, "", "", "")
 
-let sqlFile = testDir / sqlFileName
+var sqlFilePath = testDir & "/" & sqlFileName
 
 type
   Person = tuple[id: int,
@@ -59,8 +61,8 @@ suite &"Test ormin features of {backend}":
   discard
 
 suite "query":
-  db.dropTable(sqlFile)
-  db.createTable(sqlFile)
+  db.dropTable(sqlFilePath)
+  db.createTable(sqlFilePath)
 
   # prepare data to insert  
   for i in 1..personcount:

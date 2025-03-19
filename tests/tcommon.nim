@@ -1,5 +1,5 @@
 import unittest, json, strutils, strformat, sequtils, macros, times, os, math, unicode
-import ormin
+import ../ormin
 import ./utils
 
 when defined(postgre):
@@ -10,7 +10,7 @@ when defined(postgre):
   const sqlFileName = "model_postgre.sql"
   let db {.global.} = open("localhost", "test", "test", "test")
 else:
-  from db_sqlite import exec, getValue
+  from db_connector/db_sqlite import exec, getValue
 
   const backend = DbBackend.sqlite
   importModel(backend, "model_sqlite")

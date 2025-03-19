@@ -1,6 +1,6 @@
-import unittest, sqlite3, json, times, sequtils
-from db_sqlite import exec, getValue
-import ormin
+import unittest, db_connector/sqlite3, json, times, sequtils
+from db_connector/db_sqlite import exec, getValue
+import ../ormin
 import ./utils
 
 importModel(DbBackend.sqlite, "model_sqlite")

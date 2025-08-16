@@ -42,12 +42,24 @@ let payload = %*{"dt2": %*"2023-10-01T00:00:00Z"}
 query:
   insert tb_timestamp(dt1 = ?dt1, dt2 = %payload["dt2"])
 
-# Explicit join and raw SQL splice
-# Explicit join
+# Explicit join with filter
 let rows = query:
   select post(author)
   join person(name) on author == id
   where id == ?postId
+
+# Automatic join generated from foreign keys
+let postsWithAuthors = query:
+  select post(title, author(name))
+  where author.name == ?userName
+
+# Multiple joins with pagination
+let page = query:
+  select post(title, person(name), category(title))
+  join person(name) on author == id
+  join category(title) on category == id
+  orderby desc(post.creation)
+  limit 5 offset 10
 
 # Vendor-specific function via raw SQL splice
 query:

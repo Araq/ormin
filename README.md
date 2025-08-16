@@ -5,12 +5,23 @@ Ormin is a compile-time SQL query DSL and prepared statement generator for Nim. 
 ## Schema and Database Setup
 
 1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you【F:ormin.nim†L8-L31】
-2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. Open the connection using the appropriate backend (SQLite example below)【F:tests/tsqlite.nim†L6-L11】
+2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
+
+### SQLite
 
 ```nim
 import ../ormin
 importModel(DbBackend.sqlite, "model_sqlite")
 let db {.global.} = open(":memory:", "", "", "")
+```
+
+### PostgreSQL
+
+```nim
+import postgres
+import ../ormin
+importModel(DbBackend.postgre, "model_postgre")
+let db {.global.} = open("localhost", "user", "password", "dbname")
 ```
 
 ## Query DSL

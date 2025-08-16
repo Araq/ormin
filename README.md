@@ -69,7 +69,32 @@ query:
 
 Compile with `-d:debugOrminSql` to see the produced SQL at build time, which helps when experimenting with the DSL.
 
-`tryQuery` executes a query but ignores database errors; `createProc` and `createIter` generate reusable procedures or iterators for a query【F:ormin/queries.nim†L951-L986】.
+`tryQuery` executes a query but ignores database errors. `createProc` and `createIter` wrap a `query` block into a callable method on `db` for reuse【F:ormin/queries.nim†L951-L986】.
+
+### Reusable Procedures and Iterators
+
+`createProc` turns a query into a procedure that returns all rows at once:
+
+```nim
+createProc postsByAuthor:
+  select post(id, title)
+  where author == ?userId
+
+let posts = db.postsByAuthor(userId)
+```
+
+`createIter` emits an iterator that yields rows lazily:
+
+```nim
+createIter postsIter:
+  select post(id, title)
+  where author == ?userId
+
+for row in db.postsIter(userId):
+  echo row.title
+```
+
+Both forms accept parameters matching the `?`/`%` placeholders and produce the same return types as an inline `query` block.
 
 ## Return Types
 

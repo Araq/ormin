@@ -9,8 +9,6 @@ template importModel*(backend: DbBackend; filename: string) {.dirty.} =
   ## imports a model from an SQL file.
   bind fileExists, addFileExt, staticExec, ExeExt, parentDir, `/`
   const file = static:
-    #when not fileExists(addFileExt("tools/ormin_importer", ExeExt)):
-    #  echo staticExec("nim c tools/ormin_importer", "", "tools/ormin_importer.nim")
     let path = parentDir(instantiationInfo(-1, true)[0])
     let file = path / filename & ".sql"
     let res = gorgeEx("tools/ormin_importer " & file)

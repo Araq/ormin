@@ -1,6 +1,8 @@
-import unittest, postgres, json, strutils, macros, times, os, sequtils
+import unittest, json, strutils, macros, times, os, sequtils
+import db_connector/postgres
 import ormin
-from db_postgres import exec, getValue
+
+from db_connector/postgres import exec, getValue
 import ./utils
 
 importModel(DbBackend.postgre, "model_postgre")

@@ -1,6 +1,10 @@
-import unittest, postgres, json, strutils, macros, times, os, sequtils
+import unittest, json, strutils, macros, times, os, sequtils
+import db_connector/postgres
 import ormin
-from db_postgres import exec, getValue
+when NimMajor < 2:
+  from db_connector/db_postgres import exec, getValue
+else:
+  from db_connector/postgres import exec, getValue
 import ./utils
 
 importModel(DbBackend.postgre, "model_postgre")

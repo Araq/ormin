@@ -1,10 +1,8 @@
 import unittest, json, strutils, macros, times, os, sequtils
 import db_connector/postgres
 import ormin
-when NimMajor < 2:
-  from db_connector/db_postgres import exec, getValue
-else:
-  from db_connector/postgres import exec, getValue
+
+from db_connector/postgres import exec, getValue
 import ./utils
 
 importModel(DbBackend.postgre, "model_postgre")

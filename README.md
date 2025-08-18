@@ -1,10 +1,33 @@
-# Ormin
+# ormin
 
-Ormin is a compile-time SQL query DSL and prepared statement generator for Nim. It allows you to describe queries in Nim syntax and compiles them into type-safe, parameterized SQL. The system can generate iterators and procedures for repeated queries and has optional JSON support.
+Prepared SQL statement generator for Nim. A lightweight ORM.
+
+Features:
+
+- Compile time query checking: Types as well as table
+  and column names are checked, no surprises at runtime!
+- Automatic join generation: Ormin knows the table
+  relations and can compute the "natural" join for you!
+- Nim based DSL for queries: No syntax errors at runtime,
+  no SQL injections possible.
+- Generated prepared statements: As fast as low level
+  hand written API calls!
+- First class JSON support: No explicit conversions
+  from rows to JSON objects required.
+
+TODO:
+
+- Add support for UNION, INTERSECT and EXCEPT.
+- Transactions.
+- Better support for complex nested queries.
+- Write mysql backend.
+
+Copyright (c) 2017 Andreas Rumpf.
+All rights reserved.
 
 ## Schema and Database Setup
 
-1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you【F:ormin.nim†L8-L31】
+1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you
 2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
 
 ### SQLite
@@ -26,7 +49,7 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 
 ## Query DSL
 
-`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments【F:ormin/queries.nim†L300-L319】. Typical clauses such as `where`, `join`, `orderby`, `groupby`, `limit` and `offset` are supported, and `returning` captures generated values (e.g. inserted IDs)【F:ormin/queries.nim†L736-L767】. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
+`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `where`, `join`, `orderby`, `groupby`, `limit` and `offset` are supported, and `returning` captures generated values (e.g. inserted IDs). Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
 
 Example snippets:
 
@@ -69,7 +92,7 @@ query:
 
 Compile with `-d:debugOrminSql` to see the produced SQL at build time, which helps when experimenting with the DSL.
 
-`tryQuery` executes a query but ignores database errors. `createProc` and `createIter` wrap a `query` block into a callable method on `db` for reuse【F:ormin/queries.nim†L951-L986】.
+`tryQuery` executes a query but ignores database errors. `createProc` and `createIter` wrap a `query` block into a callable method on `db` for reuse.
 
 ### Reusable Procedures and Iterators
 
@@ -98,11 +121,11 @@ Both forms accept parameters matching the `?`/`%` placeholders and produce the s
 
 ## Return Types
 
-- Selecting multiple columns returns a sequence of tuples of the inferred Nim types【F:tests/tsqlite.nim†L49-L52】.
+- Selecting multiple columns returns a sequence of tuples of the inferred Nim types.
 - Selecting a single column produces a sequence of that Nim type, e.g. `let names: seq[string] = query: select person(name)`.
-- `produce json` emits `JsonNode` objects instead of Nim tuples【F:tests/tsqlite.nim†L85-L89】; `produce nim` forces standard Nim results【F:tests/tfeature.nim†L450-L465】.
-- `returning` or `limit 1` make the query return a single value or tuple instead of a sequence【F:ormin/queries.nim†L736-L759】.
-- Generated procedures/iterators return the same types as the underlying query (see `createProc`/`createIter` tests)【F:tests/tsqlite.nim†L70-L83】.
+- `produce json` emits `JsonNode` objects instead of Nim tuples; `produce nim` forces standard Nim results.
+- `returning` or `limit 1` make the query return a single value or tuple instead of a sequence.
+- Generated procedures/iterators return the same types as the underlying query (see `createProc`/`createIter` tests).
 
 Examples:
 
@@ -158,21 +181,21 @@ query:
   where id == ?userId
 ```
 
-The tests include additional samples of JSON parameters and raw SQL expressions【F:tests/tfeature.nim†L526-L577】.
+The tests include additional samples of JSON parameters and raw SQL expressions.
 
 ## Transactions and Batching
 
-A search of the codebase shows no built-in transaction or batch APIs, so these features must be handled via the underlying `db_connector` modules (e.g. issuing `BEGIN`/`COMMIT` manually)【b75dc1†L1-L2】【a593c9†L1-L2】.
+A search of the codebase shows no built-in transaction or batch APIs, so these features must be handled via the underlying `db_connector` modules (e.g. issuing `BEGIN`/`COMMIT` manually).
 
 ## Additional Facilities
 
-- **Protocol DSL** – The `protocol` macro lets you describe paired server/client handlers that communicate via JSON messages【F:ormin/queries.nim†L1110-L1155】. Sections use keywords like `recv`, `broadcast` and `send`, and every server block must be mirrored by a client block. The chat example demonstrates this code generation.
-- **JSON Dispatcher** – `createDispatcher` constructs a dispatcher for textual commands mapped to Nim procedures【F:ormin/dispatcher.nim†L31-L56】.
-- **WebSocket Server** – `serverws` provides a small WebSocket server that can broadcast messages to selected receivers via the `serve` proc【F:ormin/serverws.nim†L8-L11】【F:ormin/serverws.nim†L131-L139】.
+- **Protocol DSL** – The `protocol` macro lets you describe paired server/client handlers that communicate via JSON messages. Sections use keywords like `recv`, `broadcast` and `send`, and every server block must be mirrored by a client block. The chat example demonstrates this code generation.
+- **JSON Dispatcher** – `createDispatcher` constructs a dispatcher for textual commands mapped to Nim procedures.
+- **WebSocket Server** – `serverws` provides a small WebSocket server that can broadcast messages to selected receivers via the `serve` proc.
 
 ## Tooling
 
-The repository ships with `tools/ormin_importer`, invoked automatically by `importModel`, to parse SQL schema files into Nim type information【F:ormin.nim†L8-L16】.
+The repository ships with `tools/ormin_importer`, invoked automatically by `importModel`, to parse SQL schema files into Nim type information.
 
 ## Examples
 

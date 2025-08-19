@@ -97,7 +97,7 @@ Compile with `-d:debugOrminSql` to see the produced SQL at build time, which hel
 
 ### Select and Joins
 
-Selecting columns for the primary table is done using the syntax `select Post(title, author, ...)` when `Post` is the table and `title`, `author`, etc are columns of that table. This will return a tuple containing `(title, author, ...)`. Only one table can be selected and columns must be from that table. Columns from joined tables are selected directly in the `join` syntax.
+Selecting columns for the primary table is done using the syntax `select Post(title, author, ...)` where `Post` is the table and `title`, `author`, etc are columns of that table. This will return a tuple containing `(title, author, ...)`. Only one table can be selected and columns must be from that table. Columns from joined tables are selected directly in the `join` syntax.
 
 Joins use the syntax `join Person(name, city) on author == id` where `Person` is the table and the columns `name`, and `city` are columns of that table. Often the join condition can be inferred from foreign keys and can be left out: `join Author(name, city)`. The columns listed in the joined tabled will be appended to the results tuple, i.e. `(title, author, name, city)`. Supported joins are: `join`, `innerjoin`, `outerjoin`.
 

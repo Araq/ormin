@@ -1,3 +1,5 @@
+-- pragma foreign_keys = on;
+
 create table if not exists thread(
   id integer primary key,
   name varchar(100) not null,

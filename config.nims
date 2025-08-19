@@ -4,9 +4,14 @@ task buildimporter, "Build ormin_importer":
 
 task test, "Run all test suite":
   buildimporterTask()
-  exec "nim c -r tests/tfeature"
-  exec "nim c -r tests/tcommon"
-  exec "nim c -r tests/tsqlite"
+  exec "rm -f tests/forum_model_sqlite.nim"
+  exec "rm -f tests/forum_model_postgres.nim"
+  exec "rm -f tests/model_postgre.nim"
+  exec "rm -f tests/model_sqlite.nim"
+
+  exec "nim c -f -r tests/tfeature"
+  exec "nim c -f -r tests/tcommon"
+  exec "nim c -f -r tests/tsqlite"
   # Skip PostgreSQL tests as they require a running PostgreSQL server
   # exec "nim c -r -d:postgre tests/tfeature"
   # exec "nim c -r -d:postgre tests/tcommon"

@@ -8,7 +8,7 @@ jobs:
     strategy:
       matrix:
         nim:
-          - 1.0.14
+          - 1.6.20
           - stable
           # - devel
     name: Test on nim ${{ matrix.nim }}

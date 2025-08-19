@@ -9,9 +9,9 @@ task test, "Run all test suite":
   exec "rm -f tests/model_postgre.nim"
   exec "rm -f tests/model_sqlite.nim"
 
-  exec "nim c -f -r tests/tfeature"
-  exec "nim c -f -r tests/tcommon"
-  exec "nim c -f -r tests/tsqlite"
+  exec "nim c --nimcache:.nimcache -f -r tests/tfeature"
+  exec "nim c --nimcache:.nimcache -f -r tests/tcommon"
+  exec "nim c --nimcache:.nimcache -f -r tests/tsqlite"
   # Skip PostgreSQL tests as they require a running PostgreSQL server
   # exec "nim c -r -d:postgre tests/tfeature"
   # exec "nim c -r -d:postgre tests/tcommon"

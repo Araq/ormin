@@ -1,4 +1,4 @@
--- pragma foreign_keys = on;
+pragma foreign_keys = on;
 
 create table if not exists thread(
   id integer primary key,

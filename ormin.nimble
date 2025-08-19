@@ -14,5 +14,9 @@ requires "db_connector >= 0.1.0"
 
 feature "websocket":
   requires "websocket >= 0.2.2"
+feature "karax":
+  requires "karax"
+feature "jester":
+  requires "jester"
 
 include "config.nims"

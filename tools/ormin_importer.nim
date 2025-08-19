@@ -149,10 +149,21 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
         inc i
   result = 0
 
+proc filterPragmas(content: string): string =
+  ## Filter out pragma statements from SQL content
+  result = ""
+  for line in content.splitLines():
+    let trimmed = line.strip()
+    # Skip lines that start with "pragma" (case-insensitive)
+    if not trimmed.toLowerAscii.startsWith("pragma"):
+      result.add(line & "\n")
+
 proc generateCode(infile, outfile: string; target: Target) =
-  let stream = newFileStream(infile, fmRead)
+  let content = readFile(infile)
+  let filteredContent = filterPragmas(content)
+  let stream = newStringStream(filteredContent)
   if stream.isNil:
-    quit "fatal: cannot open " & infile
+    quit "fatal: cannot process " & infile
   let sql = parseSql(stream, infile)
   var knownTables = initOrderedTable[string, DbColumns]()
   collectTables(sql, knownTables)

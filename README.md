@@ -54,9 +54,9 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 Example snippets:
 
 ```nim
-# Select recent messages with a Nim parameter
+# Select recent rows from a Messages table with a Nim parameter
 let recentMessages = query:
-  select messages(content, creation, author)
+  select Messages(content, creation, author)
   orderby desc(creation)
   limit ?maxMessages
 
@@ -67,26 +67,27 @@ query:
 
 # Explicit join with filter
 let rows = query:
-  select post(author)
-  join person(name) on author == id
+  select Post(author)
+  join Person(name) on author == id
   where id == ?postId
 
 # Automatic join generated from foreign keys
 let postsWithAuthors = query:
-  select post(title, author(name))
+  select Post(title)
+  join Author(name)
   where author.name == ?userName
 
 # Multiple joins with pagination
 let page = query:
-  select post(title, person(name), category(title))
-  join person(name) on author == id
-  join category(title) on category == id
+  select Post(title)
+  join Person(name) on author == id
+  join Category(title) on category == id
   orderby desc(post.creation)
   limit 5 offset 10
 
 # Vendor-specific function via raw SQL splice
 query:
-  update users(lastOnline = !!"DATETIME('now')")
+  update Users(lastOnline = !!"DATETIME('now')")
   where id == ?userId
 ```
 
@@ -94,32 +95,15 @@ Compile with `-d:debugOrminSql` to see the produced SQL at build time, which hel
 
 `tryQuery` executes a query but ignores database errors. `createProc` and `createIter` wrap a `query` block into a callable method on `db` for reuse.
 
-### Reusable Procedures and Iterators
+### Select and Joins
 
-`createProc` turns a query into a procedure that returns all rows at once:
+Selecting columns for the primary table is done using the syntax `select Post(title, author, ...)` where `Post` is the table and `title`, `author`, etc are columns of that table. This will return a tuple containing `(title, author, ...)`. Only one table can be selected and columns must be from that table. Unlike in SQL, columns for joined tables are selected directly in the `join` syntax.
 
-```nim
-createProc postsByAuthor:
-  select post(id, title)
-  where author == ?userId
+Joins use the syntax `join Person(name, city) on author == id` where `Person` is the table and the columns `name`, and `city` are columns of that table. Often the join condition can be inferred from foreign keys and can be left out: `join Author(name, city)`. The columns listed in the joined tabled will be appended to the results tuple, i.e. `(title, author, name, city)`. Supported joins are: `join`, `innerjoin`, `outerjoin`.
 
-let posts = db.postsByAuthor(userId)
-```
+The join syntax differs from SQL but simplifies selecting fields from multiple tables by making them more explicit while still maintaing SQL's full query capabilities.
 
-`createIter` emits an iterator that yields rows lazily:
-
-```nim
-createIter postsIter:
-  select post(id, title)
-  where author == ?userId
-
-for row in db.postsIter(userId):
-  echo row.title
-```
-
-Both forms accept parameters matching the `?`/`%` placeholders and produce the same return types as an inline `query` block.
-
-## Return Types
+### Return Types
 
 - Selecting multiple columns returns a sequence of tuples of the inferred Nim types.
 - Selecting a single column produces a sequence of that Nim type, e.g. `let names: seq[string] = query: select person(name)`.
@@ -154,7 +138,7 @@ let newId = query:
   returning id
 ```
 
-## JSON and Raw SQL
+### JSON and Raw SQL
 
 JSON values can be spliced directly using `%` expressions. The `%` prefix tells Ormin to treat the following Nim expression as a `JsonNode` without conversion:
 
@@ -185,7 +169,32 @@ The tests include additional samples of JSON parameters and raw SQL expressions.
 
 ## Transactions and Batching
 
-A search of the codebase shows no built-in transaction or batch APIs, so these features must be handled via the underlying `db_connector` modules (e.g. issuing `BEGIN`/`COMMIT` manually).
+TODO!
+
+## Reusable Procedures and Iterators
+
+`createProc` turns a query into a procedure that returns all rows at once:
+
+```nim
+createProc postsByAuthor:
+  select post(id, title)
+  where author == ?userId
+
+let posts = db.postsByAuthor(userId)
+```
+
+`createIter` emits an iterator that yields rows lazily:
+
+```nim
+createIter postsIter:
+  select post(id, title)
+  where author == ?userId
+
+for row in db.postsIter(userId):
+  echo row.title
+```
+
+Both forms accept parameters matching the `?`/`%` placeholders and produce the same return types as an inline `query` block.
 
 ## Additional Facilities
 

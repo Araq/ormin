@@ -8,50 +8,52 @@ jobs:
     strategy:
       matrix:
         nim:
-          - 1.0.6
           - stable
-          # - devel
     name: Test on nim ${{ matrix.nim }}
     steps:
     - name: Checkout source code
-      uses: actions/checkout@v1
+      uses: actions/checkout@v4
       
     - name: Cache choosenim
       id: cache-choosenim
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
         path: ~/.choosenim
         key: ${{ runner.os }}-choosenim-stable
 
     - name: Cache nimble
       id: cache-nimble
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
         path: ~/.nimble
         key: ${{ runner.os }}-nimble-stable
 
     - name: Setup nim
-      uses: jiro4989/setup-nim-action@v1
+      uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: ${{ matrix.nim }}
 
     - name: Setup postgresql
       uses: harmon758/postgresql-action@v1
       with: 
-        postgresql version: '10'
+        postgresql version: '14'
         postgresql user: 'test'
         postgresql password: 'test'
         postgresql db: 'test'
 
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpcre3-dev
+
     - name: Install dependencies
       run: |
-        nimble refresh
-        nimble install -y
-        nimble install karax -y
-        nimble install jester -y
+        nimble --useSystemNim install -d
+        nimble --useSystemNim install karax -y
+        nimble --useSystemNim install jester -y
       
     - name: Run test
-      run: nimble test
+      run: nimble --useSystemNim test
       env:
         PGPASSWORD: test
 

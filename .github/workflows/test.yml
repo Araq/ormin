@@ -41,6 +41,11 @@ jobs:
         postgresql password: 'test'
         postgresql db: 'test'
 
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpcre3-dev
+
     - name: Install dependencies
       run: |
         nimble --useSystemNim install -d

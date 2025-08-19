@@ -46,7 +46,7 @@ jobs:
     - name: Install dependencies
       run: |
         nimble refresh
-        nimble install -y
+        nimble install -d
         nimble install karax -y
         nimble install jester -y
       

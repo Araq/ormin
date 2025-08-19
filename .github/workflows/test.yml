@@ -14,31 +14,31 @@ jobs:
     name: Test on nim ${{ matrix.nim }}
     steps:
     - name: Checkout source code
-      uses: actions/checkout@v1
+      uses: actions/checkout@v4
       
     - name: Cache choosenim
       id: cache-choosenim
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
         path: ~/.choosenim
         key: ${{ runner.os }}-choosenim-stable
 
     - name: Cache nimble
       id: cache-nimble
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
         path: ~/.nimble
         key: ${{ runner.os }}-nimble-stable
 
     - name: Setup nim
-      uses: jiro4989/setup-nim-action@v1
+      uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: ${{ matrix.nim }}
 
     - name: Setup postgresql
       uses: harmon758/postgresql-action@v1
       with: 
-        postgresql version: '10'
+        postgresql version: '14'
         postgresql user: 'test'
         postgresql password: 'test'
         postgresql db: 'test'

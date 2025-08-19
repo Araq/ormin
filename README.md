@@ -22,8 +22,6 @@ TODO:
 - Better support for complex nested queries.
 - Write mysql backend.
 
-Copyright (c) 2017 Andreas Rumpf.
-All rights reserved.
 
 ## Schema and Database Setup
 

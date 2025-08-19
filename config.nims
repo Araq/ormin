@@ -4,10 +4,10 @@ task buildimporter, "Build ormin_importer":
 
 task test, "Run all test suite":
   buildimporterTask()
-  exec "rm -f tests/forum_model_sqlite.nim"
-  exec "rm -f tests/forum_model_postgres.nim"
-  exec "rm -f tests/model_postgre.nim"
-  exec "rm -f tests/model_sqlite.nim"
+  removeFile("tests/forum_model_sqlite.nim")
+  removeFile("tests/forum_model_postgres.nim")
+  removeFile("tests/model_postgre.nim")
+  removeFile("tests/model_sqlite.nim")
 
   exec "nim c --nimcache:.nimcache -f -r tests/tfeature"
   exec "nim c --nimcache:.nimcache -f -r tests/tcommon"

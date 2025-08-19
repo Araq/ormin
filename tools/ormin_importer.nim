@@ -5,6 +5,12 @@
 import parsesql, streams, strutils, os, parseopt, tables
 import db_connector/db_common
 
+# Enhanced SQL parsing with PRAGMA support using nkCall nodes
+type
+  EnhancedSqlParser* = object
+    pragmas*: seq[SqlNode]  # pragma statements as nkCall nodes
+    sqlAst*: SqlNode
+
 #import compiler / [ast, renderer]
 
 const
@@ -110,6 +116,14 @@ proc getType(n: SqlNode): DbType =
 proc collectTables(n: SqlNode; t: var KnownTables) =
   if n.isNil: return
   case n.kind
+  of nkCall:
+    # Handle pragma statements (nkCall nodes with "pragma" as function name)
+    if n.len >= 1 and n[0].kind == nkIdent and n[0].strVal.toLowerAscii == "pragma":
+      # Ignore pragma statements - they're handled separately
+      return
+    else:
+      # Handle other call nodes by recursing into children
+      for i in 0..<n.len: collectTables(n[i], t)
   of nkCreateTable, nkCreateTableIfNotExists:
     let tableName = n[0].strVal
     var cols: DbColumns = @[]
@@ -149,24 +163,96 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
         inc i
   result = 0
 
-proc filterPragmas(content: string): string =
-  ## Filter out pragma statements from SQL content
-  result = ""
+proc parsePragmaStatement(line: string): SqlNode =
+  ## Parse a pragma statement into an nkCall AST node
+  let trimmed = line.strip()
+  let parts = trimmed.split(Whitespace, maxsplit = 2)
+  
+  if parts.len >= 2:
+    # Create nkCall node with "pragma" as the function name
+    result = newNode(nkCall)
+    result.add(newNode(nkIdent, "pragma"))
+    
+    # Add the pragma name as first argument
+    let pragmaName = parts[1]
+    result.add(newNode(nkIdent, pragmaName))
+    
+    if parts.len >= 3:
+      # Handle "pragma name = value" format
+      let valueStr = parts[2]
+      if "=" in valueStr:
+        let valueParts = valueStr.split("=", maxsplit = 1)
+        if valueParts.len == 2:
+          let value = valueParts[1].strip()
+          # Remove semicolon and quotes if present
+          let cleanValue = value.strip(chars = {';', ' ', '"', '\''})
+          result.add(newNode(nkStringLit, cleanValue))
+        else:
+          result.add(newNode(nkStringLit, ""))
+      else:
+        # Value without equals (e.g., "pragma optimize;")
+        let cleanValue = valueStr.strip(chars = {';', ' '})
+        if cleanValue.len > 0:
+          result.add(newNode(nkStringLit, cleanValue))
+  else:
+    # Fallback: create a simple pragma call
+    result = newNode(nkCall)
+    result.add(newNode(nkIdent, "pragma"))
+
+proc parseEnhancedSql*(content: string, filename: string): EnhancedSqlParser =
+  ## Enhanced SQL parser that handles PRAGMA statements as nkCall nodes
+  result.pragmas = @[]
+  
+  var sqlLines: seq[string] = @[]
+  
+  # First pass: extract pragma statements and build clean SQL
   for line in content.splitLines():
     let trimmed = line.strip()
-    # Skip lines that start with "pragma" (case-insensitive)
-    if not trimmed.toLowerAscii.startsWith("pragma"):
-      result.add(line & "\n")
+    if trimmed.toLowerAscii.startsWith("pragma"):
+      # Parse and store pragma statement as nkCall AST node
+      let pragmaNode = parsePragmaStatement(line)
+      result.pragmas.add(pragmaNode)
+      # Replace with empty line to maintain line numbers for error reporting
+      sqlLines.add("")
+    else:
+      sqlLines.add(line)
+  
+  # Second pass: parse the clean SQL with standard parsesql
+  let cleanSql = sqlLines.join("\n")
+  let stream = newStringStream(cleanSql)
+  if stream.isNil:
+    quit "fatal: cannot create stream for " & filename
+  
+  result.sqlAst = parseSql(stream, filename)
+  stream.close()
+  
+  # Third pass: integrate pragma nodes into the main AST
+  # Add pragma nodes to the beginning of the statement list
+  if result.sqlAst.kind == nkStmtList and result.pragmas.len > 0:
+    # Create a new statement list with pragmas first
+    let newStmtList = newNode(nkStmtList)
+    # Add all pragma statements first
+    for pragma in result.pragmas:
+      newStmtList.add(pragma)
+    # Then add all original SQL statements
+    for i in 0..<result.sqlAst.len:
+      newStmtList.add(result.sqlAst[i])
+    result.sqlAst = newStmtList
 
 proc generateCode(infile, outfile: string; target: Target) =
   let content = readFile(infile)
-  let filteredContent = filterPragmas(content)
-  let stream = newStringStream(filteredContent)
-  if stream.isNil:
-    quit "fatal: cannot process " & infile
-  let sql = parseSql(stream, infile)
+  let parser = parseEnhancedSql(content, infile)
+  
+  # Log detected pragmas (optional)
+  when defined(debugOrmin):
+    for pragma in parser.pragmas:
+      if pragma.kind == nkCall and pragma.len >= 2:
+        let pragmaName = if pragma[1].kind == nkIdent: pragma[1].strVal else: "unknown"
+        let pragmaValue = if pragma.len >= 3 and pragma[2].kind == nkStringLit: pragma[2].strVal else: ""
+        echo "Detected pragma: ", pragmaName, " = ", pragmaValue
+  
   var knownTables = initOrderedTable[string, DbColumns]()
-  collectTables(sql, knownTables)
+  collectTables(parser.sqlAst, knownTables)
   var f: File
   if open(f, outfile, fmWrite):
     f.write FileHeader

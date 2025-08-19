@@ -45,15 +45,14 @@ jobs:
 
     - name: Install dependencies
       run: |
-        nimble refresh
-        nimble install -d
-        nimble install karax -y
-        nimble install jester -y
+        nimble --useSystemNim install -d
+        nimble --useSystemNim install karax -y
+        nimble --useSystemNim install jester -y
       
     - name: Run test
-      run: nimble test
+      run: nimble --useSystemNim test
       env:
         PGPASSWORD: test
 
     - name: Build examples
-      run: nimble buildexamples
+      run: nimble --useSystemNim buildexamples

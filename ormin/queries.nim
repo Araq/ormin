@@ -103,7 +103,7 @@ proc lookup(table, attr: string; env: Env): DbType =
   var alias: string
   result = lookup(table, attr, env, alias)
 
-proc search(table: openArray[string], name: string): int =
+proc lookup(table: openArray[string], name: string): int =
   result = -1
   for i, t in table:
     if cmpIgnoreCase(t, name) == 0:
@@ -372,7 +372,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
     if n.len == 2 and $n[0] == "select" and n[1].kind == nnkCall:
       let call = n[1]
       let tab = $call[0]
-      let tabIndex = tableNames.search(tab)
+      let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n[1][0]
       else:
@@ -396,7 +396,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       if cmd.len >= 1 and cmd[0].kind == nnkCall:
         let call = cmd[0]
         let tab = $call[0]
-        let tabIndex = tableNames.search(tab)
+        let tabIndex = tableNames.lookup(tab)
         if tabIndex < 0:
           error "unknown table name: " & tab, n[1][0]
         else:
@@ -571,7 +571,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
     let call = n
     let tab = $call[0]
-    let tabIndex = tableNames.search(tab)
+    let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
       error "tableSel: unknown table name: " & tab & " from: " & $tableNames, n
       return
@@ -636,7 +636,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
   elif n.kind in {nnkIdent, nnkAccQuoted, nnkSym} and q.kind == qkDelete:
     let tab = $n
-    let tabIndex = tableNames.search(tab)
+    let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
       error "tableSel:del: unknown table name: " & tab, n
       return
@@ -690,7 +690,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
        cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on" and
        cmd[0].kind == nnkCall:
       let tab = $cmd[0][0]
-      let tabIndex = tableNames.search(tab)
+      let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n
       else:
@@ -712,7 +712,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     elif cmd.kind == nnkCall:
       # auto join:
       let tab = $cmd[0]
-      let tabIndex = tableNames.search(tab)
+      let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n
       else:

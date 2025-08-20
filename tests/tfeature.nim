@@ -523,6 +523,14 @@ suite "query":
         returning id
       check id == expectedid
 
+  test "insert_return_answer":
+    # test fix #28 returning id fail under postgresql 
+      let expectedanswer = "just insert"
+      let answer = query:
+        insert antibot(id = 6, ip = "", answer = ?expectedanswer)
+        returning answer
+      check answer == expectedanswer
+
   test "insert_returning_uuid":
     # test fix #28 returning id fail under postgresql 
       let expecteduuid = "123e4567-e89b-12d3-a456-426614174000"

@@ -60,6 +60,10 @@ type
     params: Params
     coln, qmark, aliasGen: int
     colAliases: seq[(string, DbType)]
+    # Track inserted column values for potential SQLite RETURNING handling
+    insertedValues: seq[(string, NimNode)]
+    # For SQLite: expression to return instead of last_insert_rowid()
+    retExpr: NimNode
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
@@ -68,7 +72,8 @@ proc newQueryBuilder(): QueryBuilder {.compileTime.} =
     env: @[], kind: qkNone, params: @[],
     retType: newNimNode(nnkTupleTy), singleRow: false,
     retTypeIsJson: false, retNames: @[],
-    coln: 0, qmark: 0, aliasGen: 1, colAliases: @[])
+    coln: 0, qmark: 0, aliasGen: 1, colAliases: @[],
+    insertedValues: @[], retExpr: newEmptyNode())
 
 proc getAlias(q: QueryBuilder; tabIndex: int): string =
   result = tableNames[tabIndex][0] & $q.aliasGen
@@ -610,6 +615,13 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           else:
             if q.values.len > 0: q.values.add ", "
             discard cond(col[1], q.values, q.params, coltype, q)
+          # Track inserted values for potential SQLite RETURNING support
+          if q.kind in {qkInsert, qkInsertReturning, qkReplace}:
+            var valNode = col[1]
+            if valNode.kind == nnkPrefix and (let opv = $valNode[0]; opv == "?" or opv == "%"):
+              q.insertedValues.add((colname, valNode[1]))
+            elif valNode.kind in {nnkStrLit, nnkRStrLit, nnkTripleStrLit, nnkIntLit..nnkInt64Lit, nnkFloatLit}:
+              q.insertedValues.add((colname, valNode))
 
       elif col.kind == nnkPrefix and (let op = $col[0]; op == "?" or op == "%"):
         let colname = $col[1]
@@ -772,6 +784,15 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       q.retNames.add colname
     else:
       discard nimType
+
+    # check if the column is inserted, if so, use the inserted expression
+    var found = false
+    for p in q.insertedValues:
+      if cmpIgnoreCase(p[0], colname) == 0:
+        q.retExpr = p[1]
+        found = true
+        break
+
     when dbBackend == DbBackend.postgre:
       q.returning.add colname
   of "produce":
@@ -943,6 +964,14 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   let returnsData = q.kind in {qkSelect, qkJoin, qkInsertReturning}
   if not q.singleRow and q.retType.len > 0:
     blk.add getAst(whileStmt(prepStmt, res, it, body))
+  elif dbBackend == DbBackend.sqlite and q.kind == qkInsertReturning and q.retExpr.kind != nnkEmpty:
+    # For SQLite, emulate RETURNING by returning the inserted expression value.
+    # Execute the insert as a non-row statement, then yield the expression.
+    if attempt:
+      blk.add getAst(ifStmt1(prepStmt, false, newStmtList()))
+    else:
+      blk.add getAst(ifStmt2(prepStmt, false, newStmtList()))
+    blk.add q.retExpr
   elif q.returning.len > 0 and dbBackend == DbBackend.sqlite:
     blk.add getAst(insertQueryReturningId(prepStmt))
     # fix #14 delete not return value

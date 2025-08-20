@@ -785,7 +785,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
   else:
     error "unknown query component " & repr(n), n
 
-proc queryAsString(q: QueryBuilder): string =
+proc queryAsString(q: QueryBuilder, n: NimNode): string =
   result = q.head
   if q.fromm.len > 0:
     result.add "\Lfrom "
@@ -818,7 +818,7 @@ proc queryAsString(q: QueryBuilder): string =
     if q.returning.len > 0:
       result.add q.returning
   when defined(debugOrminSql):
-    echo "\n", result
+    hint("Ormin SQL: " & $result, n)
 
 proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
   result = newTree(nnkVarSection,
@@ -840,7 +840,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   for b in body:
     if b.kind == nnkCommand: queryh(b, q)
     else: error "illformed query", b
-  let sql = queryAsString(q)
+  let sql = queryAsString(q, body)
   let prepStmt = genSym(nskVar)
   let res = genSym(nskVar)
   let prepStmtCall = newCall(bindSym"prepareStmt", ident"db", newLit sql)
@@ -962,13 +962,13 @@ macro query*(body: untyped): untyped =
   var q = newQueryBuilder()
   result = queryImpl(q, body, false, false)
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), body)
 
 macro tryQuery*(body: untyped): untyped =
   var q = newQueryBuilder()
   result = queryImpl(q, body, true, false)
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), body)
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList
@@ -980,10 +980,10 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
     else: error "illformed query", b
   if q.kind notin {qkSelect, qkJoin}:
     error "query must be a 'select' or 'join'", query
-  let sql = queryAsString(q)
+  let sql = queryAsString(q, query)
   result = generateRoutine(name, q, sql, k)
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), query)
 
 macro createIter*(name, query: untyped): untyped =
   ## Creates an iterator of the given 'name' that iterates
@@ -1184,4 +1184,4 @@ macro protocol*(name: static[string]; body: untyped): untyped =
   b.server.add getAst(serverProc(disp))
   result = b.server
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), body)

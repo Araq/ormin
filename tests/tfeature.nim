@@ -1,7 +1,7 @@
 import unittest, strformat, sequtils, algorithm, sugar, json, tables, random
 import os
-import ../ormin
-import ./utils
+import ormin
+import ormin/db_utils
 when NimVersion < "1.2.0": import ./compat
 
 

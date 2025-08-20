@@ -12,8 +12,8 @@ template importModel*(backend: DbBackend; filename: string) {.dirty.} =
     let path = parentDir(instantiationInfo(-1, true)[0])
     let file = path / filename & ".sql"
     let res =
-      if fileExists("./ormin_importer"):
-        gorgeEx("./ormin_importer " & file)
+      if fileExists("./tools/ormin_importer"):
+        gorgeEx("./tools/ormin_importer " & file)
       else:
         gorgeEx("ormin_importer " & file)
     if res.exitCode != 0:

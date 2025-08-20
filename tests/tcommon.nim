@@ -1,6 +1,6 @@
 import unittest, json, strutils, strformat, sequtils, macros, times, os, math, unicode
-import ../ormin
-import ./utils
+import ormin
+import ormin/db_utils
 
 when defined(postgre):
   from db_postgres import exec, getValue

@@ -1,6 +1,6 @@
 
 task buildimporter, "Build ormin_importer":
-  exec "nim c -o:./ormin_importer tools/ormin_importer"
+  exec "nim c -o:./tools/ormin_importer tools/ormin_importer"
 
 task test, "Run all test suite":
   buildimporterTask()

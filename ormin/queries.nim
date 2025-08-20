@@ -818,7 +818,7 @@ proc queryAsString(q: QueryBuilder, n: NimNode): string =
     if q.returning.len > 0:
       result.add q.returning
   when defined(debugOrminSql):
-    hint("Ormin SQL: " & $result, n)
+    hint("Ormin SQL:\n" & $result, n)
 
 proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
   result = newTree(nnkVarSection,

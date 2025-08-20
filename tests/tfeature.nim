@@ -523,6 +523,14 @@ suite "query":
         returning id
       check id == expectedid
 
+  test "insert_returning_uuid":
+    # test fix #28 returning id fail under postgresql 
+      let expecteduuid = "123e4567-e89b-12d3-a456-426614174000"
+      let uuid = query:
+        insert error(uuid = ?expecteduuid, message = "just insert")
+        returning uuid
+      check uuid == expecteduuid
+
   test "where_json":
     let
       id = 1

@@ -218,9 +218,13 @@ proc cond(n: NimNode; q: var string; params: var Params;
       # error "cannot infer the type of the literal", n
       result.kind = dbVarchar
     if result.kind == dbBlob:
-      q.add(escape(n.strVal, "b'", "'"))
+      # For SQL string literals, single quotes must be doubled.
+      # Using strutils.escape would introduce backslashes which are
+      # not valid escapes in standard SQL/SQLite. So replace `'` with `''`.
+      q.add("b'" & n.strVal.replace("'", "''") & "'")
     else:
-      q.add(escape(n.strVal, "'", "'"))
+      # Standard SQL quoting for text values
+      q.add("'" & n.strVal.replace("'", "''") & "'")
   of nnkIntLit..nnkInt64Lit:
     result = expected
     if result.kind == dbUnknown:

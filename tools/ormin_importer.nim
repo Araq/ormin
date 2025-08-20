@@ -261,7 +261,7 @@ proc generateCode(infile, outfile: string; target: Target) =
     for k in keys(knownTables):
       if i > 0: f.write ",\L  "
       else: f.write "\L  "
-      f.write(escape(k.toLowerAscii))
+      f.write(escape(k))
       inc i
     f.write "\L]\L"
     i = 0
@@ -271,7 +271,7 @@ proc generateCode(infile, outfile: string; target: Target) =
       for a in v:
         if j > 0: f.write ",\L  "
         else: f.write "\L  "
-        f.write "Attr(name: ", escape(a.name.toLowerAscii), ", tabIndex: ", $i,
+        f.write "Attr(name: ", escape(a.name), ", tabIndex: ", $i,
                 ", typ: ", $a.typ.kind, ", key: ", $attrToKey(a, knownTables), ")"
         inc j
       inc i

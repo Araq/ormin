@@ -785,7 +785,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     else:
       discard nimType
 
-    # check if the column is inserted, if so, use the inserted expression
+    # check if the column is inserted, if so, use the inserted expression to return the value
     var found = false
     for p in q.insertedValues:
       if cmpIgnoreCase(p[0], colname) == 0:

@@ -528,7 +528,8 @@ type
     nkCreateTypeIfNotExists,
     nkCreateIndex,
     nkCreateIndexIfNotExists,
-    nkEnumDef
+    nkEnumDef,
+    nkPragma
 
 const
   LiteralNodes = {
@@ -1101,6 +1102,32 @@ proc parseDelete(p: var SqlParser): SqlNode =
   else:
     result.add(newNode(nkNone))
 
+proc parsePragma(p: var SqlParser): SqlNode =
+  ## Parses SQLite PRAGMA statements.
+  ## Supports forms:
+  ##   PRAGMA name;
+  ##   PRAGMA name = expr;
+  ##   PRAGMA name(expr);
+  getTok(p) # consume 'pragma'
+  # name can be dotted identifier or general primary expression
+  # Use primary so dotted names like schema.table.pragma work.
+  result = newNode(nkPragma)
+  result.add(primary(p))
+  # Optional assignment or parenthesized argument
+  if isOpr(p, "="):
+    getTok(p)
+    result.add(parseExpr(p))
+  elif p.tok.kind == tkParLe:
+    # Parenthesized argument is parsed as a group expression
+    getTok(p)
+    var grp = newNode(nkPrGroup)
+    grp.add(parseExpr(p))
+    while p.tok.kind == tkComma:
+      getTok(p)
+      grp.add(parseExpr(p))
+    eat(p, tkParRi)
+    result.add(grp)
+
 proc parseSelect(p: var SqlParser): SqlNode =
   getTok(p)
   if isKeyw(p, "distinct"):
@@ -1213,6 +1240,9 @@ proc parseStmt(p: var SqlParser; parent: SqlNode) =
     parent.add parseDelete(p)
   elif isKeyw(p, "select"):
     parent.add parseSelect(p)
+  elif isKeyw(p, "pragma"):
+    # SQLite specific: treat as standalone statement
+    parent.add parsePragma(p)
   elif isKeyw(p, "begin"):
     getTok(p)
   else:
@@ -1529,6 +1559,18 @@ proc ra(n: SqlNode, s: var SqlWriter) =
   of nkEnumDef:
     s.addKeyw("enum")
     rs(n, s)
+  of nkPragma:
+    s.addKeyw("pragma")
+    if n.len >= 1:
+      s.add(' ')
+      ra(n.sons[0], s)
+    if n.len == 2:
+      # If value is a parenthesized group, render without '='
+      if n.sons[1].kind == nkPrGroup:
+        ra(n.sons[1], s)
+      else:
+        s.add(" = ")
+        ra(n.sons[1], s)
 
 proc renderSql*(n: SqlNode, upperCase = false): string =
   ## Converts an SQL abstract syntax tree to its string representation.

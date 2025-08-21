@@ -526,7 +526,7 @@ suite "query":
       check id == expectedid
 
   test "insert_return_answer":
-    # test fix #28 returning id fail under postgresql 
+    # test returning non-id parameter
       let expectedanswer = "just insert"
       let answer = query:
         insert antibot(id = 9, ip = "", answer = ?expectedanswer)
@@ -534,14 +534,14 @@ suite "query":
       check answer == expectedanswer
 
   test "insert_return_id_auto":
-    # test fix #28 returning id fail under postgresql 
+    # test returning id column
       let answer = query:
         insert antibot(ip = "", answer = "just another insert")
         returning id
       check answer == 10
 
   test "insert_returning_uuid":
-    # test fix #28 returning id fail under postgresql 
+    # test returning uuid column
       let expecteduuid = "123e4567-e89b-12d3-a456-426614174000"
       let uuid = query:
         insert error(uuid = ?expecteduuid, message = "just insert")

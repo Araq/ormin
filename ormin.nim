@@ -15,6 +15,7 @@ template importModel*(backend: DbBackend; filename: string) {.dirty.} =
       if fileExists("./tools/ormin_importer"):
         gorgeEx("./tools/ormin_importer " & file)
       else:
+        # run ormin_importer from the PATH
         gorgeEx("ormin_importer " & file)
     if res.exitCode != 0:
       raise newException(Exception, "Failed to generate model: " & res.output)

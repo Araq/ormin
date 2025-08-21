@@ -165,6 +165,13 @@ proc escIdent(dest: var string; src: string) =
   else:
     dest.add("\"" & replace(src, "\"", "\"\"") & "\"")
 
+proc fmtTableList(tableNames: openArray[string]): string =
+  result = ""
+  for i, t in tableNames:
+    if i > 10: break
+    if i > 0: result.add ", "
+    result.add t
+
 proc lookupColumnInEnv(n: NimNode; q: var string; params: var Params;
                       expected: DbType, qb: QueryBuilder): DbType =
   expectKind(n, nnkIdent)
@@ -383,7 +390,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let tab = $call[0]
       let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
-        error "unknown table name: " & tab, n[1][0]
+        error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
       else:
         let alias = qb.getAlias(tabIndex)
         var subenv = @[(tabIndex, alias)]
@@ -407,7 +414,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
         let tab = $call[0]
         let tabIndex = tableNames.lookup(tab)
         if tabIndex < 0:
-          error "unknown table name: " & tab, n[1][0]
+          error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
         else:
           let alias = qb.getAlias(tabIndex)
           qb.env = @[(tabindex, alias)]
@@ -582,7 +589,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     let tab = $call[0]
     let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
-      error "tableSel: unknown table name: " & tab & " from: " & $tableNames, n
+      error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       return
     let alias = q.getAlias(tabIndex)
     if q.kind == qkSelect:
@@ -654,7 +661,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     let tab = $n
     let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
-      error "tableSel:del: unknown table name: " & tab, n
+      error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       return
     escIdent(q.head, tab)
     q.env.add((tabindex, q.getAlias(tabIndex)))
@@ -708,7 +715,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       let tab = $cmd[0][0]
       let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
-        error "unknown table name: " & tab, n
+        error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       else:
         escIdent(q.join, tab)
         let alias = q.getAlias(tabIndex)
@@ -730,7 +737,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       let tab = $cmd[0]
       let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
-        error "unknown table name: " & tab, n
+        error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
       else:
         let alias = q.getAlias(tabIndex)
         escIdent(q.join, tab)

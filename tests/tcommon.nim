@@ -1,6 +1,6 @@
 import unittest, json, strutils, strformat, sequtils, macros, times, os, math, unicode
-import ../ormin
-import ./utils
+import ormin
+import ormin/db_utils
 
 when defined(postgre):
   from db_postgres import exec, getValue
@@ -222,7 +222,7 @@ suite "float":
     check res == fs.mapIt(abs(it))
 
 
-let ss = ["one", "Two", "three", "第四"]
+let ss = ["one", "Two", "three", "第四", "four'th"]
 
 suite "string_insert":
   setup:
@@ -233,6 +233,12 @@ suite "string_insert":
     for v in ss:
       query:
         insert tb_string(typstring = ?v)
+    check db.getValue(sql"select count(*) from tb_string") == $ss.len
+
+  test "insert":
+    for v in ss:
+      query:
+        insert tb_string(typstring = "can't touch this")
     check db.getValue(sql"select count(*) from tb_string") == $ss.len
 
   test "json":

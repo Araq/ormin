@@ -50,5 +50,11 @@ create table if not exists antibot(
   created timestamp not null default CURRENT_TIMESTAMP
 );
 
+create table if not exists error(
+  uuid varchar(36) primary key,
+  message varchar(1000) not null,
+  created timestamp not null default CURRENT_TIMESTAMP
+);
+
 create index PersonStatusIdx on person(status);
 create index PostByAuthorIdx on post(thread, author);

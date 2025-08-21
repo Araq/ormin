@@ -1,7 +1,7 @@
 import unittest, strformat, sequtils, algorithm, sugar, json, tables, random
 import os
-import ../ormin
-import ./utils
+import ormin
+import ormin/db_utils
 when NimVersion < "1.2.0": import ./compat
 
 
@@ -243,6 +243,8 @@ suite "query":
     let res = query:
       select person(id, name, password, email, salt, status)
       limit 1
+    static:
+      echo "LIMIT TEST: ", typeof(res)
     check res == persondata[id - 1]
 
   test "offset":
@@ -522,6 +524,29 @@ suite "query":
         insert antibot(id = ?expectedid, ip = "", answer = "just insert")
         returning id
       check id == expectedid
+
+  test "insert_return_answer":
+    # test fix #28 returning id fail under postgresql 
+      let expectedanswer = "just insert"
+      let answer = query:
+        insert antibot(id = 9, ip = "", answer = ?expectedanswer)
+        returning answer
+      check answer == expectedanswer
+
+  test "insert_return_id_auto":
+    # test fix #28 returning id fail under postgresql 
+      let answer = query:
+        insert antibot(ip = "", answer = "just another insert")
+        returning id
+      check answer == 10
+
+  test "insert_returning_uuid":
+    # test fix #28 returning id fail under postgresql 
+      let expecteduuid = "123e4567-e89b-12d3-a456-426614174000"
+      let uuid = query:
+        insert error(uuid = ?expecteduuid, message = "just insert")
+        returning uuid
+      check uuid == expecteduuid
 
   test "where_json":
     let

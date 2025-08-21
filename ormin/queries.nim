@@ -60,6 +60,10 @@ type
     params: Params
     coln, qmark, aliasGen: int
     colAliases: seq[(string, DbType)]
+    # Track inserted column values for potential SQLite RETURNING handling
+    insertedValues: seq[(string, NimNode)]
+    # For SQLite: expression to return instead of last_insert_rowid()
+    retExpr: NimNode
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
@@ -68,7 +72,8 @@ proc newQueryBuilder(): QueryBuilder {.compileTime.} =
     env: @[], kind: qkNone, params: @[],
     retType: newNimNode(nnkTupleTy), singleRow: false,
     retTypeIsJson: false, retNames: @[],
-    coln: 0, qmark: 0, aliasGen: 1, colAliases: @[])
+    coln: 0, qmark: 0, aliasGen: 1, colAliases: @[],
+    insertedValues: @[], retExpr: newEmptyNode())
 
 proc getAlias(q: QueryBuilder; tabIndex: int): string =
   result = tableNames[tabIndex][0] & $q.aliasGen
@@ -102,6 +107,12 @@ proc lookup(table, attr: string; env: Env; alias: var string): DbType =
 proc lookup(table, attr: string; env: Env): DbType =
   var alias: string
   result = lookup(table, attr, env, alias)
+
+proc lookup(table: openArray[string], name: string): int =
+  result = -1
+  for i, t in table:
+    if cmpIgnoreCase(t, name) == 0:
+      return i
 
 proc autoJoin(join: var string, src: (int, string), dest: int;
               destAlias: string): bool =
@@ -212,9 +223,13 @@ proc cond(n: NimNode; q: var string; params: var Params;
       # error "cannot infer the type of the literal", n
       result.kind = dbVarchar
     if result.kind == dbBlob:
-      q.add(escape(n.strVal, "b'", "'"))
+      # For SQL string literals, single quotes must be doubled.
+      # Using strutils.escape would introduce backslashes which are
+      # not valid escapes in standard SQL/SQLite. So replace `'` with `''`.
+      q.add("b'" & n.strVal.replace("'", "''") & "'")
     else:
-      q.add(escape(n.strVal, "'", "'"))
+      # Standard SQL quoting for text values
+      q.add("'" & n.strVal.replace("'", "''") & "'")
   of nnkIntLit..nnkInt64Lit:
     result = expected
     if result.kind == dbUnknown:
@@ -366,7 +381,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
     if n.len == 2 and $n[0] == "select" and n[1].kind == nnkCall:
       let call = n[1]
       let tab = $call[0]
-      let tabIndex = tableNames.find(tab)
+      let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n[1][0]
       else:
@@ -390,7 +405,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       if cmd.len >= 1 and cmd[0].kind == nnkCall:
         let call = cmd[0]
         let tab = $call[0]
-        let tabIndex = tableNames.find(tab)
+        let tabIndex = tableNames.lookup(tab)
         if tabIndex < 0:
           error "unknown table name: " & tab, n[1][0]
         else:
@@ -484,7 +499,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     yld.add newCall("add", ident"result", ident"res")
 
   let whileStmt = newTree(nnkWhileStmt,
-    newCall(bindSym"stepQuery", ident"db", prepStmt, newLit 1), yld)
+    newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true), yld)
   body.add whileStmt
   body.add newCall(bindSym"stopQuery", ident"db", prepStmt)
 
@@ -565,9 +580,9 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
     let call = n
     let tab = $call[0]
-    let tabIndex = tableNames.find(tab)
+    let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
-      error "unknown table name: " & tab, n
+      error "tableSel: unknown table name: " & tab & " from: " & $tableNames, n
       return
     let alias = q.getAlias(tabIndex)
     if q.kind == qkSelect:
@@ -600,6 +615,13 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           else:
             if q.values.len > 0: q.values.add ", "
             discard cond(col[1], q.values, q.params, coltype, q)
+          # Track inserted values for potential SQLite RETURNING support
+          if q.kind in {qkInsert, qkInsertReturning, qkReplace}:
+            var valNode = col[1]
+            if valNode.kind == nnkPrefix and (let opv = $valNode[0]; opv == "?" or opv == "%"):
+              q.insertedValues.add((colname, valNode[1]))
+            elif valNode.kind in {nnkStrLit, nnkRStrLit, nnkTripleStrLit, nnkIntLit..nnkInt64Lit, nnkFloatLit}:
+              q.insertedValues.add((colname, valNode))
 
       elif col.kind == nnkPrefix and (let op = $col[0]; op == "?" or op == "%"):
         let colname = $col[1]
@@ -630,9 +652,9 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
   elif n.kind in {nnkIdent, nnkAccQuoted, nnkSym} and q.kind == qkDelete:
     let tab = $n
-    let tabIndex = tableNames.find(tab)
+    let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
-      error "unknown table name: " & tab, n
+      error "tableSel:del: unknown table name: " & tab, n
       return
     escIdent(q.head, tab)
     q.env.add((tabindex, q.getAlias(tabIndex)))
@@ -684,7 +706,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
        cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on" and
        cmd[0].kind == nnkCall:
       let tab = $cmd[0][0]
-      let tabIndex = tableNames.find(tab)
+      let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n
       else:
@@ -706,7 +728,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     elif cmd.kind == nnkCall:
       # auto join:
       let tab = $cmd[0]
-      let tabIndex = tableNames.find(tab)
+      let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
         error "unknown table name: " & tab, n
       else:
@@ -762,6 +784,15 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       q.retNames.add colname
     else:
       discard nimType
+
+    # check if the column is inserted, if so, use the inserted expression
+    var found = false
+    for p in q.insertedValues:
+      if cmpIgnoreCase(p[0], colname) == 0:
+        q.retExpr = p[1]
+        found = true
+        break
+
     when dbBackend == DbBackend.postgre:
       q.returning.add colname
   of "produce":
@@ -775,7 +806,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
   else:
     error "unknown query component " & repr(n), n
 
-proc queryAsString(q: QueryBuilder): string =
+proc queryAsString(q: QueryBuilder, n: NimNode): string =
   result = q.head
   if q.fromm.len > 0:
     result.add "\Lfrom "
@@ -808,7 +839,7 @@ proc queryAsString(q: QueryBuilder): string =
     if q.returning.len > 0:
       result.add q.returning
   when defined(debugOrminSql):
-    echo "\n", result
+    hint("Ormin SQL:\n" & $result, n)
 
 proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
   result = newTree(nnkVarSection,
@@ -830,7 +861,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   for b in body:
     if b.kind == nnkCommand: queryh(b, q)
     else: error "illformed query", b
-  let sql = queryAsString(q)
+  let sql = queryAsString(q, body)
   let prepStmt = genSym(nskVar)
   let res = genSym(nskVar)
   let prepStmtCall = newCall(bindSym"prepareStmt", ident"db", newLit sql)
@@ -890,7 +921,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   else:
     body.add newTree(nnkDiscardStmt, newEmptyNode())
 
-  template ifStmt2(prepStmt, returnsData, action) {.dirty.} =
+  template ifStmt2(prepStmt, returnsData: bool; action) {.dirty.} =
     bind stepQuery
     bind stopQuery
     bind dbError
@@ -901,7 +932,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
       stopQuery(db, prepStmt)
       dbError(db)
 
-  template ifStmt1(prepStmt, returnsData, action) {.dirty.} =
+  template ifStmt1(prepStmt, returnsData: bool; action) {.dirty.} =
     bind stepQuery
     bind stopQuery
     if stepQuery(db, prepStmt, returnsData):
@@ -911,7 +942,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   template whileStmt(prepStmt, res, it, action) {.dirty.} =
     bind stepQuery
     bind stopQuery
-    while stepQuery(db, prepStmt, 1):
+    while stepQuery(db, prepStmt, true):
       action
       add res, it
     stopQuery(db, prepStmt)
@@ -922,7 +953,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     bind getLastId
     bind dbError
     var insertedId = -1
-    if stepQuery(db, prepStmt, 0):
+    if stepQuery(db, prepStmt, false):
       insertedId = getLastId(db, prepStmt)
       stopQuery(db, prepStmt)
     else:
@@ -933,6 +964,14 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   let returnsData = q.kind in {qkSelect, qkJoin, qkInsertReturning}
   if not q.singleRow and q.retType.len > 0:
     blk.add getAst(whileStmt(prepStmt, res, it, body))
+  elif dbBackend == DbBackend.sqlite and q.kind == qkInsertReturning and q.retExpr.kind != nnkEmpty:
+    # For SQLite, emulate RETURNING by returning the inserted expression value.
+    # Execute the insert as a non-row statement, then yield the expression.
+    if attempt:
+      blk.add getAst(ifStmt1(prepStmt, false, newStmtList()))
+    else:
+      blk.add getAst(ifStmt2(prepStmt, false, newStmtList()))
+    blk.add q.retExpr
   elif q.returning.len > 0 and dbBackend == DbBackend.sqlite:
     blk.add getAst(insertQueryReturningId(prepStmt))
     # fix #14 delete not return value
@@ -952,13 +991,13 @@ macro query*(body: untyped): untyped =
   var q = newQueryBuilder()
   result = queryImpl(q, body, false, false)
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), body)
 
 macro tryQuery*(body: untyped): untyped =
   var q = newQueryBuilder()
   result = queryImpl(q, body, true, false)
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), body)
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList
@@ -970,10 +1009,10 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
     else: error "illformed query", b
   if q.kind notin {qkSelect, qkJoin}:
     error "query must be a 'select' or 'join'", query
-  let sql = queryAsString(q)
+  let sql = queryAsString(q, query)
   result = generateRoutine(name, q, sql, k)
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), query)
 
 macro createIter*(name, query: untyped): untyped =
   ## Creates an iterator of the given 'name' that iterates
@@ -1174,4 +1213,4 @@ macro protocol*(name: static[string]; body: untyped): untyped =
   b.server.add getAst(serverProc(disp))
   result = b.server
   when defined(debugOrminDsl):
-    echo repr result
+    hint("Ormin Query: " & repr(result), body)

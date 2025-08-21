@@ -529,7 +529,13 @@ type
     nkCreateIndex,
     nkCreateIndexIfNotExists,
     nkEnumDef,
-    nkPragma
+    nkPragma,
+    nkAutoIncrement,
+    nkOnDelete,
+    nkOnUpdate,
+    nkDeferrable,
+    nkInitially,
+    nkCollate
 
 const
   LiteralNodes = {
@@ -834,6 +840,92 @@ proc parseColumnConstraints(p: var SqlParser, result: SqlNode) =
       getTok(p)
       var n = newNode(nkReferences)
       n.add(parseColumnReference(p))
+      # Optional reference actions and attributes
+      #   ON DELETE <action> | ON UPDATE <action>
+      #   DEFERRABLE [INITIALLY {DEFERRED|IMMEDIATE}] | NOT DEFERRABLE
+      #   MATCH <name>
+      while true:
+        if isKeyw(p, "on"):
+          getTok(p)
+          if isKeyw(p, "delete"):
+            getTok(p)
+            var act = newNode(nkOnDelete)
+            # Parse action: cascade | restrict | no action | set null | set default
+            if isKeyw(p, "cascade") or isKeyw(p, "restrict"):
+              act.add(newNode(nkIdent, p.tok.literal.toLowerAscii()))
+              getTok(p)
+            elif isKeyw(p, "no"):
+              getTok(p); eat(p, "action")
+              act.add(newNode(nkIdent, "no action"))
+            elif isKeyw(p, "set"):
+              getTok(p)
+              if isKeyw(p, "null"):
+                getTok(p)
+                act.add(newNode(nkIdent, "set null"))
+              elif isKeyw(p, "default"):
+                getTok(p)
+                act.add(newNode(nkIdent, "set default"))
+              else:
+                # Unknown, stop parsing ON ...
+                discard
+            else:
+              discard
+            n.add(act)
+          elif isKeyw(p, "update"):
+            getTok(p)
+            var act = newNode(nkOnUpdate)
+            if isKeyw(p, "cascade") or isKeyw(p, "restrict"):
+              act.add(newNode(nkIdent, p.tok.literal.toLowerAscii()))
+              getTok(p)
+            elif isKeyw(p, "no"):
+              getTok(p); eat(p, "action")
+              act.add(newNode(nkIdent, "no action"))
+            elif isKeyw(p, "set"):
+              getTok(p)
+              if isKeyw(p, "null"):
+                getTok(p)
+                act.add(newNode(nkIdent, "set null"))
+              elif isKeyw(p, "default"):
+                getTok(p)
+                act.add(newNode(nkIdent, "set default"))
+              else:
+                discard
+            else:
+              discard
+            n.add(act)
+          else:
+            # Unknown ON ... clause
+            discard
+        elif isKeyw(p, "deferrable"):
+          getTok(p)
+          var d = newNode(nkDeferrable)
+          if isKeyw(p, "initially"):
+            getTok(p)
+            if isKeyw(p, "deferred") or isKeyw(p, "immediate"):
+              d.add(newNode(nkInitially, p.tok.literal.toLowerAscii()))
+              getTok(p)
+          n.add(d)
+        elif isKeyw(p, "not"):
+          getTok(p)
+          if isKeyw(p, "deferrable"):
+            getTok(p)
+            var d = newNode(nkDeferrable)
+            d.add(newNode(nkIdent, "not"))
+            n.add(d)
+          else:
+            # Unknown NOT ... clause
+            discard
+        elif isKeyw(p, "match"):
+          # Consume match <name>
+          getTok(p)
+          if p.tok.kind in {tkIdentifier, tkQuotedIdentifier}:
+            # store as an identifier child under references
+            n.add(newNode(nkIdent, p.tok.literal.toLowerAscii()))
+            getTok(p)
+          else:
+            discard
+        else:
+          break
       result.add(n)
     elif isKeyw(p, "not"):
       getTok(p)
@@ -856,6 +948,19 @@ proc parseColumnConstraints(p: var SqlParser, result: SqlNode) =
     elif isKeyw(p, "unique"):
       getTok(p)
       result.add(newNode(nkUnique))
+    elif isKeyw(p, "autoincrement"):
+      getTok(p)
+      result.add(newNode(nkAutoIncrement))
+    elif isKeyw(p, "collate"):
+      getTok(p)
+      # collate <name>
+      if p.tok.kind in {tkIdentifier, tkQuotedIdentifier}:
+        var c = newNode(nkCollate)
+        c.add(newNode(nkIdent, p.tok.literal))
+        getTok(p)
+        result.add(c)
+      else:
+        discard
     else:
       break
 
@@ -891,6 +996,83 @@ proc parseTableConstraint(p: var SqlParser): SqlNode =
     eat(p, "references")
     var m = newNode(nkReferences)
     m.add(parseColumnReference(p))
+    # Optional reference actions and attributes for table-level FK
+    while true:
+      if isKeyw(p, "on"):
+        getTok(p)
+        if isKeyw(p, "delete"):
+          getTok(p)
+          var act = newNode(nkOnDelete)
+          if isKeyw(p, "cascade") or isKeyw(p, "restrict"):
+            act.add(newNode(nkIdent, p.tok.literal.toLowerAscii()))
+            getTok(p)
+          elif isKeyw(p, "no"):
+            getTok(p); eat(p, "action")
+            act.add(newNode(nkIdent, "no action"))
+          elif isKeyw(p, "set"):
+            getTok(p)
+            if isKeyw(p, "null"):
+              getTok(p)
+              act.add(newNode(nkIdent, "set null"))
+            elif isKeyw(p, "default"):
+              getTok(p)
+              act.add(newNode(nkIdent, "set default"))
+            else:
+              discard
+          else:
+            discard
+          m.add(act)
+        elif isKeyw(p, "update"):
+          getTok(p)
+          var act = newNode(nkOnUpdate)
+          if isKeyw(p, "cascade") or isKeyw(p, "restrict"):
+            act.add(newNode(nkIdent, p.tok.literal.toLowerAscii()))
+            getTok(p)
+          elif isKeyw(p, "no"):
+            getTok(p); eat(p, "action")
+            act.add(newNode(nkIdent, "no action"))
+          elif isKeyw(p, "set"):
+            getTok(p)
+            if isKeyw(p, "null"):
+              getTok(p)
+              act.add(newNode(nkIdent, "set null"))
+            elif isKeyw(p, "default"):
+              getTok(p)
+              act.add(newNode(nkIdent, "set default"))
+            else:
+              discard
+          else:
+            discard
+          m.add(act)
+        else:
+          discard
+      elif isKeyw(p, "deferrable"):
+        getTok(p)
+        var d = newNode(nkDeferrable)
+        if isKeyw(p, "initially"):
+          getTok(p)
+          if isKeyw(p, "deferred") or isKeyw(p, "immediate"):
+            d.add(newNode(nkInitially, p.tok.literal.toLowerAscii()))
+            getTok(p)
+        m.add(d)
+      elif isKeyw(p, "not"):
+        getTok(p)
+        if isKeyw(p, "deferrable"):
+          getTok(p)
+          var d = newNode(nkDeferrable)
+          d.add(newNode(nkIdent, "not"))
+          m.add(d)
+        else:
+          discard
+      elif isKeyw(p, "match"):
+        getTok(p)
+        if p.tok.kind in {tkIdentifier, tkQuotedIdentifier}:
+          m.add(newNode(nkIdent, p.tok.literal.toLowerAscii()))
+          getTok(p)
+        else:
+          discard
+      else:
+        break
     result.add(m)
   elif isKeyw(p, "unique"):
     getTok(p)
@@ -1394,6 +1576,8 @@ proc ra(n: SqlNode, s: var SqlWriter) =
   of nkDefault:
     s.addKeyw("default")
     ra(n.sons[0], s)
+  of nkAutoIncrement:
+    s.addKeyw("autoincrement")
   of nkCheck:
     s.addKeyw("check")
     ra(n.sons[0], s)
@@ -1495,6 +1679,34 @@ proc ra(n: SqlNode, s: var SqlWriter) =
   of nkUsing:
     s.addKeyw("using")
     rs(n, s)
+  of nkOnDelete:
+    s.addKeyw("on delete")
+    s.add(' ')
+    if n.len > 0: ra(n.sons[0], s)
+  of nkOnUpdate:
+    s.addKeyw("on update")
+    s.add(' ')
+    if n.len > 0: ra(n.sons[0], s)
+  of nkDeferrable:
+    if n.len > 0 and n.sons[0].kind == nkIdent and n.sons[0].strVal == "not":
+      s.addKeyw("not deferrable")
+    else:
+      s.addKeyw("deferrable")
+    if n.len > 0:
+      for i in 0 ..< n.len:
+        if n.sons[i].kind == nkInitially:
+          s.addKeyw("initially")
+          s.add(' ')
+          ra(n.sons[i], s)
+  of nkInitially:
+    if n.len == 0:
+      s.add(n.strVal)
+    else:
+      ra(n.sons[0], s)
+  of nkCollate:
+    s.addKeyw("collate")
+    s.add(' ')
+    if n.len > 0: ra(n.sons[0], s)
   of nkGroup:
     s.addKeyw("group by")
     s.addMulti(n)

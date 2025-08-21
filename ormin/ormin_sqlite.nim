@@ -209,7 +209,7 @@ template stopQuery*(db: DbConn; s: PStmt) =
   if sqlite3.reset(s) != SQLITE_OK: dbError(db)
 
 template stepQuery*(db: DbConn; s: PStmt; returnsData: bool): bool =
-  when returnsData == true:
+  when returnsData:
     step(s) == SQLITE_ROW
   else:
     step(s) == SQLITE_DONE

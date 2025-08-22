@@ -1,9 +1,9 @@
 
 when not declared(tableNames):
-  {.error: "The query DSL requires a tableNames const.".}
+  {.macros.error: "The query DSL requires a tableNames const.".}
 
 when not declared(attributes):
-  {.error: "The query DSL requires a attributes const.".}
+  {.macros.error: "The query DSL requires a attributes const.".}
 
 import macros, strutils
 import db_connector/db_common
@@ -140,15 +140,15 @@ proc `$`(a: DbType): string = $a.kind
 
 proc checkBool(a: DbType; n: NimNode) =
   if a.kind != dbBool:
-    error "expected type 'bool', but got: " & $a, n
+    macros.error "expected type 'bool', but got: " & $a, n
 
 proc checkInt(a: DbType; n: NimNode) =
   if a.kind != dbInt:
-    error "expected type 'int', but got: " & $a, n
+    macros.error "expected type 'int', but got: " & $a, n
 
 proc checkCompatible(a, b: DbType; n: NimNode) =
   if a.kind != b.kind:
-    error "incompatible types: " & $a & " and " & $b, n
+    macros.error "incompatible types: " & $a & " and " & $b, n
 
 proc checkCompatibleSet(a, b: DbType; n: NimNode) =
   discard "too implement; might require a richer type system"
@@ -184,7 +184,7 @@ proc lookupColumnInEnv(n: NimNode; q: var string; params: var Params;
     var alias: string
     result = lookup("", name, qb.env, alias)
     if result.kind == dbUnknown:
-      error "unknown column name: " & name, n
+      macros.error "unknown column name: " & name, n
     elif qb.kind in {qkSelect, qkJoin}:
       doAssert alias.len >= 0
       q.add alias
@@ -214,7 +214,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = cond(n[0], q, params, expected, qb)
       q.add ")"
     else:
-      error "tuple construction not allowed here", n
+      macros.error "tuple construction not allowed here", n
   of nnkCurly:
     q.add "("
     let a = cond(n[0], q, params, expected, qb)
@@ -227,7 +227,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
   of nnkStrLit, nnkRStrLit, nnkTripleStrLit:
     result = expected
     if result.kind == dbUnknown:
-      # error "cannot infer the type of the literal", n
+      # macros.error "cannot infer the type of the literal", n
       result.kind = dbVarchar
     if result.kind == dbBlob:
       # For SQL string literals, single quotes must be doubled.
@@ -323,7 +323,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       q.add placeHolder(qb)
       result = expected
       if result.kind == dbUnknown:
-        error "cannot infer the type of the placeholder", n
+        macros.error "cannot infer the type of the placeholder", n
       else:
         params.add((ex: n[1], typ: toNimType(result), isJson: op == "%"))
     of "not":
@@ -334,7 +334,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
     of "!!":
       result = expected
       if result.kind == dbUnknown:
-        error "cannot infer the type of the literal", n
+        macros.error "cannot infer the type of the literal", n
       let arg = n[1]
       if arg.kind in {nnkStrLit..nnkTripleStrLit}: q.add arg.strVal
       else: q.add repr(n[1])
@@ -364,8 +364,8 @@ proc cond(n: NimNode; q: var string; params: var Params;
           q.add ")"
           return
         else:
-          error "function " & op & " takes " & $f.arity & " arguments", n
-    error "unknown function " & op
+          macros.error "function " & op & " takes " & $f.arity & " arguments", n
+    macros.error "unknown function " & op
   of nnkIfStmt, nnkIfExpr:
     q.add "\Lcase "
     result = DbType(kind: dbUnknown)
@@ -377,7 +377,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
         q.add " then"
       of nnkElse, nnkElseExpr:
         q.add "\L  else"
-      else: error "illformed if expression", n
+      else: macros.error "illformed if expression", n
       q.add "\L    "
       let t = cond(x[^1], q, params, result, qb)
       if result.kind == dbUnknown: result = t
@@ -390,7 +390,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let tab = $call[0]
       let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
-        error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
+        macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
       else:
         let alias = qb.getAlias(tabIndex)
         var subenv = @[(tabIndex, alias)]
@@ -414,7 +414,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
         let tab = $call[0]
         let tabIndex = tableNames.lookup(tab)
         if tabIndex < 0:
-          error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
+          macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
         else:
           let alias = qb.getAlias(tabIndex)
           qb.env = @[(tabindex, alias)]
@@ -438,15 +438,15 @@ proc cond(n: NimNode; q: var string; params: var Params;
           else:
             discard cond(hav, subselect, params, DbType(kind: dbBool), qb)
         else:
-          error "construct not supported in condition: " & treeRepr cmd, cmd
+          macros.error "construct not supported in condition: " & treeRepr cmd, cmd
       elif cmd.len >= 2:
-        error "construct not supported in condition: " & treeRepr cmd, cmd
+        macros.error "construct not supported in condition: " & treeRepr cmd, cmd
       qb.env = subenv
       q.add subselect
     else:
-      error "construct not supported in condition: " & treeRepr n, n
+      macros.error "construct not supported in condition: " & treeRepr n, n
   else:
-    error "construct not supported in condition: " & treeRepr n, n
+    macros.error "construct not supported in condition: " & treeRepr n, n
 
 proc generateRoutine(name: NimNode, q: QueryBuilder;
                      sql: string; k: NimNodeKind): NimNode =
@@ -531,13 +531,13 @@ proc getColumnName(n: NimNode): string =
   else:
     # this is a little hacky, if the column name starts with
     # a space, it means "could not extract the column name"
-    # but we need to emit this error lazily:
+    # but we need to emit this macros.error lazily:
     result = " " & repr(n)
 
 proc retName(q: QueryBuilder; i: int; n: NimNode): string =
   result = q.retNames[i]
   if q.retTypeIsJson and result.startsWith(" "):
-    error "cannot extract column name of:" & result, n
+    macros.error "cannot extract column name of:" & result, n
     result = ""
 
 proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
@@ -580,7 +580,7 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         q.head.add " = "
         q.head.add placeholder(q)
   else:
-    error "select '_' not supported for this construct", lineInfo
+    macros.error "select '_' not supported for this construct", lineInfo
 
 
 proc tableSel(n: NimNode; q: QueryBuilder) =
@@ -589,7 +589,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     let tab = $call[0]
     let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
-      error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
+      macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       return
     let alias = q.getAlias(tabIndex)
     if q.kind == qkSelect:
@@ -610,7 +610,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
         else:
           let coltype = lookup("", colname, q.env)
           if coltype.kind == dbUnknown:
-            error "unkown column name: " & colname, col
+            macros.error "unkown column name: " & colname, col
           else:
             if q.coln > 0: q.head.add ", "
             escIdent(q.head, colname)
@@ -634,7 +634,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
         let colname = $col[1]
         let coltype = lookup("", colname, q.env)
         if coltype.kind == dbUnknown:
-          error "unkown column name: " & colname, col
+          macros.error "unkown column name: " & colname, col
         else:
           if q.coln > 0: q.head.add ", "
           escIdent(q.head, colname)
@@ -655,20 +655,20 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
         q.retType.add nnkIdentDefs.newTree(newIdentNode(getColumnName(col)), toNimType(t), newEmptyNode())
         q.retNames.add getColumnName(col)
       else:
-        error "unknown selector: " & repr(n), n
+        macros.error "unknown selector: " & repr(n), n
     if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
   elif n.kind in {nnkIdent, nnkAccQuoted, nnkSym} and q.kind == qkDelete:
     let tab = $n
     let tabIndex = tableNames.lookup(tab)
     if tabIndex < 0:
-      error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
+      macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       return
     escIdent(q.head, tab)
     q.env.add((tabindex, q.getAlias(tabIndex)))
   elif n.kind == nnkRStrLit:
     q.head.add n.strVal
   else:
-    error "unknown selector: " & repr(n), n
+    macros.error "unknown selector: " & repr(n), n
 
 
 proc queryh(n: NimNode; q: QueryBuilder) =
@@ -715,7 +715,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       let tab = $cmd[0][0]
       let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
-        error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
+        macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       else:
         escIdent(q.join, tab)
         let alias = q.getAlias(tabIndex)
@@ -737,20 +737,20 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       let tab = $cmd[0]
       let tabIndex = tableNames.lookup(tab)
       if tabIndex < 0:
-        error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
+        macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
       else:
         let alias = q.getAlias(tabIndex)
         escIdent(q.join, tab)
         q.join.add " as " & alias
         if not autoJoin(q.join, q.env[^1], tabIndex, alias):
-          error "cannot compute auto join from: " & tableNames[q.env[^1][0]] & " to: " & tab, n
+          macros.error "cannot compute auto join from: " & tableNames[q.env[^1][0]] & " to: " & tab, n
         var oldEnv = q.env
         q.env = @[(tabIndex, alias)]
         q.kind = qkJoin
         tableSel(n[1], q)
         swap q.env, oldEnv
     else:
-      error "unknown query component " & repr(n), n
+      macros.error "unknown query component " & repr(n), n
   of "groupby":
     for i in 1..<n.len:
       discard cond(n[i], q.groupby, q.params, DbType(kind: dbUnknown), q)
@@ -774,7 +774,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     checkInt(t, n[1])
   of "returning":
     if q.kind != qkInsert:
-      error "'returning' only possible within 'insert'"
+      macros.error "'returning' only possible within 'insert'"
     q.kind = qkInsertReturning
     expectLen n, 2
     when dbBackend == DbBackend.sqlite:
@@ -809,9 +809,9 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     elif eqIdent(n[1], "nim") or eqIdent(n[1], "tuple"):
       q.retTypeIsJson = false
     else:
-      error "produce expects 'json' or 'nim', but got: " & repr(n[1]), n
+      macros.error "produce expects 'json' or 'nim', but got: " & repr(n[1]), n
   else:
-    error "unknown query component " & repr(n), n
+    macros.error "unknown query component " & repr(n), n
 
 proc queryAsString(q: QueryBuilder, n: NimNode): string =
   result = q.head
@@ -846,7 +846,7 @@ proc queryAsString(q: QueryBuilder, n: NimNode): string =
     if q.returning.len > 0:
       result.add q.returning
   when defined(debugOrminSql):
-    hint("Ormin SQL:\n" & $result, n)
+    macros.hint("Ormin SQL:\n" & $result, n)
 
 proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
   result = newTree(nnkVarSection,
@@ -867,7 +867,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   q.retTypeIsJson = produceJson
   for b in body:
     if b.kind == nnkCommand: queryh(b, q)
-    else: error "illformed query", b
+    else: macros.error "illformed query", b
   let sql = queryAsString(q, body)
   let prepStmt = genSym(nskVar)
   let res = genSym(nskVar)
@@ -998,13 +998,13 @@ macro query*(body: untyped): untyped =
   var q = newQueryBuilder()
   result = queryImpl(q, body, false, false)
   when defined(debugOrminDsl):
-    hint("Ormin Query: " & repr(result), body)
+    macros.hint("Ormin Query: " & repr(result), body)
 
 macro tryQuery*(body: untyped): untyped =
   var q = newQueryBuilder()
   result = queryImpl(q, body, true, false)
   when defined(debugOrminDsl):
-    hint("Ormin Query: " & repr(result), body)
+    macros.hint("Ormin Query: " & repr(result), body)
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList
@@ -1013,13 +1013,13 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   var q = newQueryBuilder()
   for b in query:
     if b.kind == nnkCommand: queryh(b, q)
-    else: error "illformed query", b
+    else: macros.error "illformed query", b
   if q.kind notin {qkSelect, qkJoin}:
-    error "query must be a 'select' or 'join'", query
+    macros.error "query must be a 'select' or 'join'", query
   let sql = queryAsString(q, query)
   result = generateRoutine(name, q, sql, k)
   when defined(debugOrminDsl):
-    hint("Ormin Query: " & repr(result), query)
+    macros.hint("Ormin Query: " & repr(result), query)
 
 macro createIter*(name, query: untyped): untyped =
   ## Creates an iterator of the given 'name' that iterates
@@ -1097,7 +1097,7 @@ proc transformClient(n: NimNode; b: ProtoBuilder): NimNode =
       expectLen p, 2
       expectKind p[1], nnkIdentDefs
       if p[1].len != 3:
-        error "proc must have one or zero parameters", p
+        macros.error "proc must have one or zero parameters", p
       n.body = getAst(sendReqImpl(p[1][0], b.msgId))
     b.procs.add n
     return newTree(nnkNone)
@@ -1167,7 +1167,7 @@ proc protoImpl(n: NimNode; b: ProtoBuilder): NimNode =
         if n.len == 3:
           expectKind(n[1], nnkStrLit)
           if b.sectionName != n[1].strVal:
-            error "section names of client/server pair do not match", n[1]
+            macros.error "section names of client/server pair do not match", n[1]
         var clientPart = transformClient(n[^1], b)
         if clientPart.kind == nnkNone or (clientPart.kind == nnkStmtList and clientPart.len == 0):
           clientPart = newStmtList(newTree(nnkDiscardStmt, newEmptyNode()))
@@ -1220,4 +1220,4 @@ macro protocol*(name: static[string]; body: untyped): untyped =
   b.server.add getAst(serverProc(disp))
   result = b.server
   when defined(debugOrminDsl):
-    hint("Ormin Query: " & repr(result), body)
+    macros.hint("Ormin Query: " & repr(result), body)

@@ -2,8 +2,10 @@
 ## (c) 2017 Andreas Rumpf
 ## MIT License.
 
-import parsesql, streams, strutils, os, parseopt, tables
+import streams, strutils, os, parseopt, tables
 import db_connector/db_common
+
+import ./parsesql_tmp
 
 #import compiler / [ast, renderer]
 

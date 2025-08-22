@@ -11,7 +11,12 @@ template importModel*(backend: DbBackend; filename: string) {.dirty.} =
   const file = static:
     let path = parentDir(instantiationInfo(-1, true)[0])
     let file = path / filename & ".sql"
-    let res = gorgeEx("tools/ormin_importer " & file)
+    let res =
+      if fileExists("./tools/ormin_importer"):
+        gorgeEx("./tools/ormin_importer " & file)
+      else:
+        # run ormin_importer from the PATH
+        gorgeEx("ormin_importer " & file)
     if res.exitCode != 0:
       raise newException(Exception, "Failed to generate model: " & res.output)
     file

@@ -103,6 +103,8 @@ The join syntax differs from SQL but simplifies selecting fields from multiple t
 
 ### Return Types
 
+The core return type for queries is a sequence of tuples where the tuples fields are the types of the columns. Some queries with `returning` or `limit` clauses will return singular values or raise a DbError.
+
 - Selecting multiple columns returns a sequence of tuples of the inferred Nim types.
 - Selecting a single column produces a sequence of that Nim type, e.g. `let names: seq[string] = query: select person(name)`.
 - `produce json` emits `JsonNode` objects instead of Nim tuples; `produce nim` forces standard Nim results.
@@ -129,11 +131,32 @@ let threadJson = query:
 let threadNim = query:
   select thread(id, name)
   produce nim
+```
 
-# Single row via returning
+Single tuples or values can be returned in some cases:
+
+```nim
+# Single value returning
 let newId = query:
   insert thread(name = ?"topic")
   returning id
+
+# Single row value returning when limit is a const `1`
+let newId = query:
+  select thread(name = ?"topic")
+  orderby desc(trhead.id)
+  limit 1
+```
+
+**Note**: use an integer arg to limit to return a sequence instead!
+
+```nim
+let n = 1
+let newId = query:
+  select thread(name = ?"topic")
+  orderby desc(trhead.id)
+  limit ?n
+
 ```
 
 ### JSON and Raw SQL

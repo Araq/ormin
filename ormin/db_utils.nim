@@ -1,4 +1,4 @@
-import db_connector/db_common, strutils, strformat, re
+import db_connector/db_common, strutils, strformat, pegs
 import db_connector/db_postgres as db_postgres
 import db_connector/db_sqlite as db_sqlite
 
@@ -6,10 +6,13 @@ type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 
 iterator tablePairs(sqlFile: string): tuple[name, model: string] =
   let f = readFile(sqlFile)
+  let pat = peg"start <- \s* 'create' \s+ 'table' \s+ ('if' \s+ 'not' \s+ 'exists' \s+)? { [A-Za-z_][A-Za-z0-9_]* }"
   for m in f.split(';'):
-    if m.strip() != "" and
-       m =~ re"\n*create\s+table(\s+if\s+not\s+exists)?\s+(\w+)":
-      yield (matches[1], m)
+    let s = m.toLowerAscii()
+    if m.strip() != "":
+      var caps = newSeq[string](1)
+      if s.match(pat, caps):
+        yield (caps[0], m)
 
 proc createTable*(db: DbConn; sqlFile: string) =
   for _, m in tablePairs(sqlFile):

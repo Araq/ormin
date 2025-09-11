@@ -22,12 +22,12 @@ run_psql_cmd() {
 run_psql_file postgres tools/setup_postgres_role.sql
 
 # Create database 'test' if needed (must be outside DO block)
-if ! psql -v ON_ERROR_STOP=1 -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'test'" | grep -q 1; then
-  run_psql_cmd postgres "CREATE DATABASE test OWNER test"
+if ! psql -v ON_ERROR_STOP=1 -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'test_ormin'" | grep -q 1; then
+  run_psql_cmd postgres "CREATE DATABASE test_ormin OWNER test"
 fi
 
 # Grant privileges on public schema
-run_psql_cmd test "GRANT ALL PRIVILEGES ON SCHEMA public TO test"
+run_psql_cmd test_ormin "GRANT ALL PRIVILEGES ON SCHEMA public TO test"
 
-echo "Postgres test DB/user ensured (role 'test', db 'test')."
+echo "Postgres test DB/user ensured (role 'test', db 'test_ormin')."
 

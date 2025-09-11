@@ -8,7 +8,7 @@ import ./utils
 importModel(DbBackend.postgre, "model_postgre")
 
 let
-  db {.global.} = open("localhost", "test", "test", "test")
+  db {.global.} = open("localhost", "test", "test", "test_ormin")
   testDir = currentSourcePath.parentDir()
   sqlFile = testDir / "model_postgre.sql"
 

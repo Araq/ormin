@@ -8,7 +8,7 @@ when defined(postgre):
   const backend = DbBackend.postgre
   importModel(backend, "model_postgre")
   const sqlFileName = "model_postgre.sql"
-  let db {.global.} = open("localhost", "test", "test", "test")
+  let db {.global.} = open("localhost", "test", "test", "test_ormin")
 else:
   from db_connector/db_sqlite import exec, getValue
 

@@ -537,6 +537,9 @@ suite "query":
 
   test "insert_return_id_auto":
     # test returning id column
+      when defined(postgre):
+        # fix postgres sequence so next nextval returns 10
+        discard db.getValue(sql"select setval('antibot_id_seq', ?, ?)", 10, false)
       let answer = query:
         insert antibot(ip = "", answer = "just auto insert")
         returning id

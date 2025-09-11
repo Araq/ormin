@@ -49,12 +49,6 @@ jobs:
       with:
         nim-version: ${{ matrix.nim }}
 
-    - name: Start PostgreSQL
-      run: |
-        sudo systemctl start postgresql@14-main
-        sudo -u postgres psql -c "CREATE USER test WITH SUPERUSER CREATEDB CREATEROLE PASSWORD 'test';"
-        sudo -u postgres psql -c "CREATE DATABASE test_ormin OWNER test;"
-
     - name: Install system dependencies
       run: |
         sudo apt-get update

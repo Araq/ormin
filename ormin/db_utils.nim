@@ -6,12 +6,23 @@ type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 
 iterator tablePairs(sqlFile: string): tuple[name, model: string] =
   let f = readFile(sqlFile)
-  let pat = peg"start <- \s* 'create' \s+ 'table' \s+ ('if' \s+ 'not' \s+ 'exists' \s+)? { [A-Za-z_][A-Za-z0-9_]* }"
+  let pat = peg"""
+    start <- \s* 'create' \s+ 'table' \s+ ('if' \s+ 'not' \s+ 'exists' \s+)? ident
+    ident <- quoted / unquoted
+    quoted <- '"' { (!'"' .)+ } '"'
+    unquoted <- { [A-Za-z_][A-Za-z0-9_]* }
+  """
   for m in f.split(';'):
     let s = m.toLowerAscii()
     if m.strip() != "":
+      var cleaned = newSeq[string]()
+      for ln in s.splitLines():
+        let t = ln.strip()
+        if not t.startsWith("--"):
+          cleaned.add ln
+      let sc = cleaned.join("\n")
       var caps = newSeq[string](1)
-      if s.match(pat, caps):
+      if sc.match(pat, caps):
         yield (caps[0], m)
 
 proc createTable*(db: DbConn; sqlFile: string) =

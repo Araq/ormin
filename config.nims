@@ -18,9 +18,14 @@ task test, "Run all test suite":
   exec "nim c -f -r tests/tcommon"
   exec "nim c -f -r tests/tsqlite"
 
+task setup_postgres, "Ensure local Postgres has test DB/user":
+  # Use a simple script to avoid Nim/psql quoting pitfalls
+  exec "bash -lc 'bash tools/setup_postgres.sh'"
+
 task test_postgres, "Run PostgreSQL test suite":
-  # Skip PostgreSQL tests as they require a running PostgreSQL server
   cleanTask()
+  buildimporterTask()
+  setup_postgresTask()
 
   exec "nim c -r -d:postgre tests/tfeature"
   exec "nim c -r -d:postgre tests/tcommon"

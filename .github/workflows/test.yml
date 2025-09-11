@@ -39,7 +39,7 @@ jobs:
         postgresql version: '14'
         postgresql user: 'test'
         postgresql password: 'test'
-        postgresql db: 'test'
+        postgresql db: 'test_ormin'
 
     - name: Install system dependencies
       run: |

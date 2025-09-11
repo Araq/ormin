@@ -52,8 +52,11 @@ jobs:
         nimble --useSystemNim install karax -y
         nimble --useSystemNim install jester -y
       
-    - name: Run test
+    - name: Run test sqlite
       run: nimble --useSystemNim test
+
+    - name: Run test postgres
+      run: nimble --useSystemNim test_postgres
       env:
         PGPASSWORD: test
 

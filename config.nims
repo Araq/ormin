@@ -3,10 +3,16 @@ switch("nimcache", ".nimcache")
 task buildimporter, "Build ormin_importer":
   exec "nim c -o:./tools/ormin_importer tools/ormin_importer"
 
-task test, "Run all test suite":
-  buildimporterTask()
+task clean, "Clean generated files":
   rmFile("tests/forum_model_sqlite.nim")
   rmFile("tests/model_sqlite.nim")
+
+  rmFile("tests/forum_model_postgres.nim")
+  rmFile("tests/model_postgre.nim")
+
+task test, "Run all test suite":
+  buildimporterTask()
+  cleanTask()
 
   exec "nim c -f -r tests/tfeature"
   exec "nim c -f -r tests/tcommon"
@@ -14,8 +20,7 @@ task test, "Run all test suite":
 
 task test_postgres, "Run PostgreSQL test suite":
   # Skip PostgreSQL tests as they require a running PostgreSQL server
-  rmFile("tests/forum_model_postgres.nim")
-  rmFile("tests/model_postgre.nim")
+  cleanTask()
 
   exec "nim c -r -d:postgre tests/tfeature"
   exec "nim c -r -d:postgre tests/tcommon"

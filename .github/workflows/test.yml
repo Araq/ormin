@@ -33,13 +33,11 @@ jobs:
       with:
         nim-version: ${{ matrix.nim }}
 
-    - name: Setup postgresql
-      uses: harmon758/postgresql-action@v1
-      with: 
-        postgresql version: '14'
-        postgresql user: 'test'
-        postgresql password: 'test'
-        postgresql db: 'test_ormin'
+    - name: Start PostgreSQL
+      run: |
+        sudo systemctl start postgresql@14-main
+        sudo -u postgres psql -c "CREATE USER test WITH SUPERUSER CREATEDB CREATEROLE PASSWORD 'test';"
+        sudo -u postgres psql -c "CREATE DATABASE test_ormin OWNER test;"
 
     - name: Install system dependencies
       run: |

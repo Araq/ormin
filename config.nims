@@ -25,7 +25,7 @@ task setup_postgres, "Ensure local Postgres has test DB/user":
 task test_postgres, "Run PostgreSQL test suite":
   cleanTask()
   buildimporterTask()
-  setup_postgresTask()
+  # setup_postgresTask()
   # Pre-generate Postgres models to avoid include timing issues
   exec "./tools/ormin_importer tests/forum_model_postgres.sql"
   exec "./tools/ormin_importer tests/model_postgre.sql"

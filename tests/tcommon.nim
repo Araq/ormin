@@ -338,3 +338,55 @@ suite "json":
       select tb_json(typjson)
       produce json
     check res == %*js.mapIt(%*{"typjson": it})
+
+
+let cps = [
+  (1, 1, "one-one"),
+  (1, 2, "one-two"),
+  (2, 1, "two-one")
+]
+
+suite "composite_pk_insert":
+  setup:
+    db.dropTable(sqlFile, "tb_composite_pk")
+    db.createTable(sqlFile, "tb_composite_pk")
+
+  test "insert":
+    for r in cps:
+      query:
+        insert tb_composite_pk(pk1 = ?r[0], pk2 = ?r[1], message = ?r[2])
+    check db.getValue(sql"select count(*) from tb_composite_pk") == $cps.len
+
+  test "json":
+    for r in cps:
+      let v = %*{"pk1": r[0], "pk2": r[1], "message": r[2]}
+      query:
+        insert tb_composite_pk(pk1 = %v["pk1"], pk2 = %v["pk2"], message = %v["message"])
+    check db.getValue(sql"select count(*) from tb_composite_pk") == $cps.len
+
+
+suite "composite_pk":
+  db.dropTable(sqlFile, "tb_composite_pk")
+  db.createTable(sqlFile, "tb_composite_pk")
+
+  let insertSql = sql"insert into tb_composite_pk(pk1, pk2, message) values (?, ?, ?)"
+  for r in cps:
+    db.exec(insertSql, r[0], r[1], r[2])
+  doAssert db.getValue(sql"select count(*) from tb_composite_pk") == $cps.len
+
+  test "query":
+    let res = query:
+      select tb_composite_pk(pk1, pk2, message)
+    check res == cps
+
+  test "where":
+    let res = query:
+      select tb_composite_pk(pk1, pk2, message)
+      where pk1 == ?cps[0][0]
+    check res == cps.filterIt(it[0] == cps[0][0])
+
+  test "json":
+    let res = query:
+      select tb_composite_pk(pk1, pk2, message)
+      produce json
+    check res == %*cps.mapIt(%*{"pk1": it[0], "pk2": it[1], "message": it[2]})

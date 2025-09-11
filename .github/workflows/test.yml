@@ -51,6 +51,7 @@ jobs:
         nimble --useSystemNim install -d
         nimble --useSystemNim install karax -y
         nimble --useSystemNim install jester -y
+        nimble --useSystemNim install websocket -y
       
     - name: Run test sqlite
       run: nimble --useSystemNim test

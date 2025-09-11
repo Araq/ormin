@@ -2,6 +2,10 @@ import unittest, json, strutils, macros, times, os, sequtils
 import db_connector/postgres
 import ormin
 
+when defined(macosx):
+  {.passL: " " & gorge("pkg-config --libs libpq").}
+  {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
+
 from db_connector/postgres import exec, getValue
 import ./utils
 

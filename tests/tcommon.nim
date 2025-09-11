@@ -3,6 +3,9 @@ import ormin
 import ormin/db_utils
 
 when defined(postgre):
+  when defined(macosx):
+    {.passL: " " & gorge("pkg-config --libs libpq").}
+    {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
   from db_postgres import exec, getValue
 
   const backend = DbBackend.postgre

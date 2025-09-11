@@ -26,10 +26,13 @@ task test_postgres, "Run PostgreSQL test suite":
   cleanTask()
   buildimporterTask()
   setup_postgresTask()
+  # Pre-generate Postgres models to avoid include timing issues
+  exec "./tools/ormin_importer tests/forum_model_postgres.sql"
+  exec "./tools/ormin_importer tests/model_postgre.sql"
 
-  exec "nim c -r -d:postgre tests/tfeature"
-  exec "nim c -r -d:postgre tests/tcommon"
-  exec "nim c -r tests/tpostgre"
+  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
+  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
+  exec "nim c -f -d:nimDebugDlOpen -r tests/tpostgre"
 
 task buildexamples, "Build examples: chat and forum":
   buildimporterTask()

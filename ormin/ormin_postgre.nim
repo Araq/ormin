@@ -219,7 +219,7 @@ template startQuery*(db: DbConn; s: PStmt) =
 template stopQuery*(db: DbConn; s: PStmt) =
   pqclear(queryResult)
 
-template stepQuery*(db: DbConn; s: PStmt; returnsData: int): bool =
+template stepQuery*(db: DbConn; s: PStmt; returnsData: bool): bool =
   inc queryI
   queryI < queryLen
 

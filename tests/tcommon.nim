@@ -4,14 +4,13 @@ import ormin/db_utils
 
 when defined(postgre):
   when defined(macosx):
-    {.passL: " " & gorge("pkg-config --libs libpq").}
     {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
-  from db_postgres import exec, getValue
+  import db_connector/db_postgres as db_postgres
 
   const backend = DbBackend.postgre
   importModel(backend, "model_postgre")
   const sqlFileName = "model_postgre.sql"
-  let db {.global.} = open("localhost", "test", "test", "test_ormin")
+  let db {.global.} = db_postgres.open("localhost", "test", "test", "test_ormin")
 else:
   from db_connector/db_sqlite import exec, getValue
 

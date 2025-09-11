@@ -1,18 +1,18 @@
 import unittest, json, strutils, macros, times, os, sequtils
-import db_connector/postgres
+# Postgres connection handled through ormin_postgre backend
 import ormin
+import ormin/ormin_postgre as ormin_postgre
+import db_connector/db_postgres as db_postgres
+import ormin/db_utils
 
 when defined(macosx):
-  {.passL: " " & gorge("pkg-config --libs libpq").}
   {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
 
-from db_connector/postgres import exec, getValue
-import ./utils
 
 importModel(DbBackend.postgre, "model_postgre")
 
 let
-  db {.global.} = open("localhost", "test", "test", "test_ormin")
+  db {.global.} = ormin_postgre.open("localhost", "test", "test", "test_ormin")
   testDir = currentSourcePath.parentDir()
   sqlFile = testDir / "model_postgre.sql"
 
@@ -59,23 +59,23 @@ suite "timestamp_insert":
   test "insert":
     query:
       insert tb_timestamp(dt = ?dt1, dtn = ?dtn1, dtz = ?dtz1)
-    check db.getValue(sql"select count(*) from tb_timestamp") == "1"
+    check db_postgres.getValue(db, sql"select count(*) from tb_timestamp") == "1"
 
   test "json":
     query:
       insert tb_timestamp(dt = %dtjson1["dt"],
                           dtn = %dtjson1["dtn"],
                           dtz = %dtjson1["dtz"])
-    check db.getValue(sql"select count(*) from tb_timestamp") == "1"
+    check db_postgres.getValue(db, sql"select count(*) from tb_timestamp") == "1"
 
 suite "timestamp":
   db.dropTable(sqlFile, "tb_timestamp")
   db.createTable(sqlFile, "tb_timestamp")
 
-  db.exec(insertSql, dtStr1, dtnStr1, dtzStr1)
-  db.exec(insertSql, dtStr2, dtnStr2, dtzStr2)
-  db.exec(insertSql, dtStr3, dtnStr3, dtzStr3)
-  doAssert db.getValue(sql"select count(*) from tb_timestamp") == "3"
+  db_postgres.exec(db, insertSql, dtStr1, dtnStr1, dtzStr1)
+  db_postgres.exec(db, insertSql, dtStr2, dtnStr2, dtzStr2)
+  db_postgres.exec(db, insertSql, dtStr3, dtnStr3, dtzStr3)
+  doAssert db_postgres.getValue(db, sql"select count(*) from tb_timestamp") == "3"
 
   test "query":
     let res = query:

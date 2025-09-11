@@ -16,8 +16,9 @@ create table if not exists tb_string(
 );
 
 create table if not exists tb_timestamp(
-  dt1 timestamp not null,
-  dt2 timestamp not null
+  dt timestamp not null,
+  dtn timestamptz not null,
+  dtz timestamptz not null
 );
 
 create table if not exists tb_json(

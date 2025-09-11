@@ -529,7 +529,7 @@ suite "query":
 
   test "insert_return_answer":
     # test returning non-id parameter
-      let expectedanswer = "just insert"
+      let expectedanswer = "just insert another"
       let answer = query:
         insert antibot(id = 9, ip = "", answer = ?expectedanswer)
         returning answer
@@ -538,7 +538,7 @@ suite "query":
   test "insert_return_id_auto":
     # test returning id column
       let answer = query:
-        insert antibot(ip = "", answer = "just another insert")
+        insert antibot(ip = "", answer = "just auto insert")
         returning id
       check answer == 10
 

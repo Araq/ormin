@@ -1,4 +1,5 @@
-import db_connector/db_common, strutils, strformat, pegs
+import db_connector/db_common, strutils, strformat
+import std/parsesql
 import db_connector/db_postgres as db_postgres
 import db_connector/db_sqlite as db_sqlite
 
@@ -6,24 +7,18 @@ type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 
 iterator tablePairs(sqlFile: string): tuple[name, model: string] =
   let f = readFile(sqlFile)
-  let pat = peg"""
-    start <- \s* 'create' \s+ 'table' \s+ ('if' \s+ 'not' \s+ 'exists' \s+)? ident
-    ident <- quoted / unquoted
-    quoted <- '"' { (!'"' .)+ } '"'
-    unquoted <- { [A-Za-z_][A-Za-z0-9_]* }
-  """
   for m in f.split(';'):
-    let s = m.toLowerAscii()
-    if m.strip() != "":
-      var cleaned = newSeq[string]()
-      for ln in s.splitLines():
-        let t = ln.strip()
-        if not t.startsWith("--"):
-          cleaned.add ln
-      let sc = cleaned.join("\n")
-      var caps = newSeq[string](1)
-      if sc.match(pat, caps):
-        yield (caps[0], m)
+    let stmt = m.strip()
+    if stmt.len == 0: continue
+    try:
+      let ast = parseSql(stmt)
+      if ast.len > 0:
+        let node = ast[0]
+        if node.kind in {nkCreateTable, nkCreateTableIfNotExists}:
+          let tableName = node[0].strVal.toLowerAscii()
+          yield (tableName, stmt)
+    except SqlParseError:
+      discard
 
 proc createTable*(db: DbConn; sqlFile: string) =
   for _, m in tablePairs(sqlFile):

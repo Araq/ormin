@@ -18,7 +18,13 @@ let sqlContent = """
     id integer primary key
   );
 
+  -- std sql quoted table name
   create table "Quoted Table" (
+    id integer primary key
+  );
+
+  -- sqlite quoted table name
+  create table `Quoted Table2` (
     id integer primary key
   );
 """
@@ -28,10 +34,11 @@ writeFile(sqlFile, sqlContent)
 suite "db_utils: case and quoted names":
   test "check tables names":
     let pairs = tablePairs(sqlFile).toSeq()
-    check pairs.len == 3
+    check pairs.len == 4
     check pairs[0][0] == ("lower_table")
     check pairs[1][0] == ("upper_table")
     check pairs[2][0] == ("quoted table")
+    check pairs[3][0] == ("quoted table2")
 
 
     check pairs[0][1] == "create table lower_table(id  integer  primary key );"

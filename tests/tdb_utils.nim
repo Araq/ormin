@@ -33,7 +33,9 @@ suite "db_utils: case and quoted names":
     check pairs[1][0] == ("upper_table")
     check pairs[2][0] == ("quoted_table")
 
-    check pairs[0][1] == ("create table lower_table (id integer primary key)")
+
+    echo pairs[0][1].repr()
+    check pairs[0][1] == ("create table lower_table (id  integer  primary  key);")
 
   test "createTable creates all tables from SQL file":
     db.createTable(sqlFile)

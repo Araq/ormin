@@ -14,7 +14,7 @@ importModel(DbBackend.postgre, "model_postgre")
 let
   db {.global.} = ormin_postgre.open("localhost", "test", "test", "test_ormin")
   testDir = currentSourcePath.parentDir()
-  sqlFile = testDir / "model_postgre.sql"
+  sqlFile = Path(testDir / "model_postgre.sql")
 
 
 suite "Test special database types and functions of postgre":

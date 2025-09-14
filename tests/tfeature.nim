@@ -25,7 +25,7 @@ else:
   var memoryPath = testDir & "/" & ":memory:"
   let db {.global.} = open(memoryPath, "", "", "")
 
-var sqlFilePath = testDir & "/" & sqlFileName
+var sqlFilePath = Path(testDir & "/" & sqlFileName)
 
 type
   Person = tuple[id: int,

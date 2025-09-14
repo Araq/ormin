@@ -1,7 +1,9 @@
+import std/paths
 import db_connector/db_common, strutils, strformat
-import std/parsesql, std/paths
 import db_connector/db_postgres as db_postgres
 import db_connector/db_sqlite as db_sqlite
+
+import parsesql_tmp # import std/parsesql
 
 export paths
 
@@ -9,7 +11,13 @@ type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 
 iterator tablePairs*(sql: string): tuple[name, model: string] =
   # Parse the entire SQL file and iterate statements via the SQL parser
-  let ast = parseSql(sql)
+  var ast: SqlNode
+  try:
+    ast = parseSql(sql)
+  except SqlParseError as e:
+    echo "SQL Parse Error:\n", sql
+    raise e
+
   if ast.len > 0:
     # ast is a statement list; iterate each statement node
     for i in 0 ..< ast.len:

@@ -1,4 +1,4 @@
-import unittest, os
+import unittest, os, sequtils
 import db_connector/db_common
 from db_connector/db_sqlite import open, exec, getValue
 import ormin/db_utils
@@ -26,6 +26,15 @@ let sqlContent = """
 writeFile(sqlFile, sqlContent)
 
 suite "db_utils: case and quoted names":
+  test "check tables names":
+    let pairs = tablePairs(sqlFile).toSeq()
+    check pairs.len == 3
+    check pairs[0][0] == ("lower_table")
+    check pairs[1][0] == ("upper_table")
+    check pairs[2][0] == ("quoted_table")
+
+    check pairs[0][1] == ("create table lower_table (id integer primary key)")
+
   test "createTable creates all tables from SQL file":
     db.createTable(sqlFile)
     let countAll = db.getValue(sql"select count(*) from sqlite_master where type='table' and name in ('lower_table','UPPER_TABLE','Quoted_Table')")

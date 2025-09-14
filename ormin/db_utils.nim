@@ -5,20 +5,23 @@ import db_connector/db_sqlite as db_sqlite
 
 type DbConn = db_postgres.DbConn | db_sqlite.DbConn
 
-iterator tablePairs(sqlFile: string): tuple[name, model: string] =
+iterator tablePairs*(sqlFile: string): tuple[name, model: string] =
+  # Parse the entire SQL file and iterate statements via the SQL parser
   let f = readFile(sqlFile)
-  for m in f.split(';'):
-    let stmt = m.strip()
-    if stmt.len == 0: continue
-    try:
-      let ast = parseSql(stmt)
-      if ast.len > 0:
-        let node = ast[0]
-        if node.kind in {nkCreateTable, nkCreateTableIfNotExists}:
-          let tableName = node[0].strVal.toLowerAscii()
-          yield (tableName, stmt)
-    except SqlParseError:
-      discard
+  let ast = parseSql(f)
+  if ast.len > 0:
+    # ast is a statement list; iterate each statement node
+    for i in 0 ..< ast.len:
+      let node = ast[i]
+      if node.kind in {nkCreateTable, nkCreateTableIfNotExists}:
+        let tableName = node[0].strVal.toLowerAscii()
+        yield (tableName, $node)
+  else:
+    # Fallback: ast might be a single statement (not a list)
+    let node = ast
+    if node.kind in {nkCreateTable, nkCreateTableIfNotExists}:
+      let tableName = node[0].strVal.toLowerAscii()
+      yield (tableName, $node)
 
 proc createTable*(db: DbConn; sqlFile: string) =
   for _, m in tablePairs(sqlFile):

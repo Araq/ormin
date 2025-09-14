@@ -474,12 +474,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     if k != nnkIteratorDef:
       rtyp = nnkBracketExpr.newTree(ident"seq", rtyp)
     finalParams.add rtyp
-  when dbBackend == DbBackend.postgre:
-    finalParams.add newIdentDefs(ident"db", newTree(nnkDotExpr, ident"ormin_postgre", ident"DbConn"))
-  elif dbBackend == DbBackend.sqlite:
-    finalParams.add newIdentDefs(ident"db", newTree(nnkDotExpr, ident"ormin_sqlite", ident"DbConn"))
-  else:
-    finalParams.add newIdentDefs(ident"db", ident("DbConn"))
+  finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
   if q.params.len > 0:
     body.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))

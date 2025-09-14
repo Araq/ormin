@@ -8,7 +8,7 @@ importModel(DbBackend.sqlite, "model_sqlite")
 let
   db {.global.} = open(":memory:", "", "", "")
   testDir = currentSourcePath.parentDir()
-  sqlFile = testDir / "model_sqlite.sql"
+  sqlFile = Path(testDir / "model_sqlite.sql")
 
 
 suite "Test special database types and functions of sqlite":

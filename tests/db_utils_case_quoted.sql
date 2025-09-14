@@ -7,6 +7,6 @@
     id integer primary key
   );
 
-  create table "Quoted_Table" (
+  create table "Quoted Table" (
     id integer primary key
   );

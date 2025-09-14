@@ -6,7 +6,7 @@ import ormin/db_utils
 let
   db {.global.} = open(":memory:", "", "", "")
   testDir = currentSourcePath.parentDir()
-  sqlFile = testDir / "db_utils_case_quoted.sql"
+  sqlFile = Path(testDir / "db_utils_case_quoted.sql")
 
 let sqlContent = """
 -- lower case, upper case, and quoted table names
@@ -29,17 +29,16 @@ let sqlContent = """
   );
 """
 
-writeFile(sqlFile, sqlContent)
+writeFile($sqlFile, sqlContent)
 
 suite "db_utils: case and quoted names":
   test "check tables names":
-    let pairs = tablePairs(sqlFile).toSeq()
+    let pairs = tablePairs(sqlContent).toSeq()
     check pairs.len == 4
     check pairs[0][0] == ("lower_table")
     check pairs[1][0] == ("upper_table")
     check pairs[2][0] == ("quoted table")
     check pairs[3][0] == ("quoted table2")
-
 
     check pairs[0][1] == "create table lower_table(id  integer  primary key );"
     check pairs[1][1] == "create table UPPER_TABLE(id  integer  primary key );"

@@ -1536,7 +1536,20 @@ proc ra(n: SqlNode, s: var SqlWriter) =
     rs(n, s)
   of nkForeignKey:
     s.addKeyw("foreign key")
-    rs(n, s)
+    # Render only the column identifiers inside parentheses,
+    # then append the REFERENCES clause (and options) after.
+    var i = 0
+    s.add('(')
+    while i < n.len and n.sons[i].kind != nkReferences:
+      if i > 0: s.add(", ")
+      ra(n.sons[i], s)
+      inc i
+    s.add(')')
+    # If a REFERENCES node exists, render it after the column list
+    while i < n.len:
+      s.add(' ')
+      ra(n.sons[i], s)
+      inc i
   of nkNotNull:
     s.addKeyw("not null")
   of nkNull:

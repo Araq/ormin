@@ -22,7 +22,7 @@ else:
 
 let
   testDir = currentSourcePath.parentDir()
-  sqlFile = testDir / sqlFileName
+  sqlFile = Path(testDir / sqlFileName)
 
 
 let

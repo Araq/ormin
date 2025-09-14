@@ -65,6 +65,26 @@ type
     # For SQLite: expression to return instead of last_insert_rowid()
     retExpr: NimNode
 
+# Transaction state for nested transactions
+var txDepth* {.threadvar.}: int
+
+# Execute a non-row SQL statement strictly (errors on failure)
+template execNoRowsStrict*(sqlStmt: string) =
+  let s {.gensym.} = prepareStmt(db, sqlStmt)
+  startQuery(db, s)
+  if stepQuery(db, s, false):
+    stopQuery(db, s)
+  else:
+    stopQuery(db, s)
+    dbError(db)
+
+# Execute a non-row SQL statement, relying on startQuery to raise on failure
+template execNoRowsLoose*(sqlStmt: string) =
+  let s {.gensym.} = prepareStmt(db, sqlStmt)
+  startQuery(db, s)
+  discard stepQuery(db, s, false)
+  stopQuery(db, s)
+
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "", limit: "", offset: "",
@@ -1010,6 +1030,213 @@ macro tryQuery*(body: untyped): untyped =
   result = queryImpl(q, body, true, false)
   when defined(debugOrminDsl):
     macros.hint("Ormin Query: " & repr(result), body)
+
+# -------------------------
+# Transactions DSL
+# -------------------------
+
+macro transaction*(body: untyped): untyped =
+  ## Runs the body inside a database transaction. Commits on success,
+  ## rolls back on any exception and rethrows.
+  ## Supports nesting via savepoints.
+  let topSym = genSym(nskVar, "orminTop")
+  let spSym = genSym(nskLet, "orminSp")
+  let rvSym = genSym(nskLet, "orminRv")
+  result = newStmtList()
+  # block to ensure proper expression value propagation
+  var blockStmts = newStmtList()
+  blockStmts.add newVarStmt(topSym, newTree(nnkInfix, ident"==", ident"txDepth", newLit 0))
+  blockStmts.add newCall(ident"inc", ident"txDepth")
+  blockStmts.add newLetStmt(spSym, newTree(nnkInfix, ident"&", newLit("ormin_tx_"), newCall(ident"$", ident"txDepth")))
+
+  # BEGIN or SAVEPOINT
+  var beginStmt = newStmtList()
+  beginStmt.add newTree(nnkWhenStmt,
+    newTree(nnkElifBranch,
+      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("begin")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
+      )
+    ),
+    newTree(nnkElse,
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("begin")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
+      )
+    )
+  )
+
+  # body result
+  blockStmts.add newLetStmt(rvSym, newTree(nnkBlockStmt, newEmptyNode(), body))
+
+  # COMMIT or RELEASE SAVEPOINT
+  var commitStmt = newStmtList()
+  commitStmt.add newTree(nnkWhenStmt,
+    newTree(nnkElifBranch,
+      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("commit")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
+      )
+    ),
+    newTree(nnkElse,
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("commit")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
+      )
+    )
+  )
+
+  # try/except wrapping
+  let tryBody = newStmtList(beginStmt, newEmptyNode())
+  # after begin, execute; above rv already holds value
+  tryBody.add commitStmt
+
+  let exceptDb = newTree(nnkExceptBranch, newTree(nnkRefTy, ident"DbError"),
+    newStmtList(
+      newTree(nnkWhenStmt,
+        newTree(nnkElifBranch,
+          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        ),
+        newTree(nnkElse,
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        )
+      ),
+      newTree(nnkRaiseStmt, newEmptyNode())
+    )
+  )
+  let exceptAny = newTree(nnkExceptBranch, ident"Exception",
+    newStmtList(
+      newTree(nnkWhenStmt,
+        newTree(nnkElifBranch,
+          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        ),
+        newTree(nnkElse,
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        )
+      ),
+      newTree(nnkRaiseStmt, newEmptyNode())
+    )
+  )
+  let finallyStmtTx = newTree(nnkFinally, newStmtList(newCall(ident"dec", ident"txDepth")))
+  let tryStmt = newTree(nnkTryStmt, tryBody, exceptDb, exceptAny, finallyStmtTx)
+  blockStmts.add tryStmt
+  blockStmts.add rvSym
+  result = newTree(nnkStmtListExpr, newTree(nnkBlockStmt, newEmptyNode(), blockStmts))
+
+macro tryTransaction*(body: untyped): untyped =
+  ## Same as `transaction` but returns bool and swallows DbError.
+  let topSym = genSym(nskVar, "orminTop")
+  let spSym = genSym(nskLet, "orminSp")
+  let okSym = genSym(nskVar, "orminOk")
+  result = newStmtList()
+  var blockStmts = newStmtList()
+  blockStmts.add newVarStmt(topSym, newTree(nnkInfix, ident"==", ident"txDepth", newLit 0))
+  blockStmts.add newCall(ident"inc", ident"txDepth")
+  blockStmts.add newLetStmt(spSym, newTree(nnkInfix, ident"&", newLit("ormin_tx_"), newCall(ident"$", ident"txDepth")))
+  blockStmts.add newTree(nnkVarSection, newIdentDefs(okSym, ident"bool", newLit(true)))
+
+  # BEGIN or SAVEPOINT
+  var beginStmt = newStmtList()
+  beginStmt.add newTree(nnkWhenStmt,
+    newTree(nnkElifBranch,
+      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("begin")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
+      )
+    ),
+    newTree(nnkElse,
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("begin")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
+      )
+    )
+  )
+
+  # Body execution as statements; ignore any result
+  let bodyBlk = newTree(nnkBlockStmt, newEmptyNode(), body)
+
+  # COMMIT or RELEASE SAVEPOINT
+  var commitStmt = newStmtList()
+  commitStmt.add newTree(nnkWhenStmt,
+    newTree(nnkElifBranch,
+      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("commit")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
+      )
+    ),
+    newTree(nnkElse,
+      newTree(nnkIfStmt,
+        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("commit")))),
+        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
+      )
+    )
+  )
+
+  let tryBody = newStmtList(beginStmt, bodyBlk, commitStmt)
+
+  let exceptDb = newTree(nnkExceptBranch, ident"DbError",
+    newStmtList(
+      newTree(nnkWhenStmt,
+        newTree(nnkElifBranch,
+          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        ),
+        newTree(nnkElse,
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        )
+      ),
+      newAssignment(okSym, newLit(false))
+    )
+  )
+  let exceptAny = newTree(nnkExceptBranch, ident"Exception",
+    newStmtList(
+      newTree(nnkWhenStmt,
+        newTree(nnkElifBranch,
+          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        ),
+        newTree(nnkElse,
+          newTree(nnkIfStmt,
+            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
+            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
+          )
+        )
+      ),
+      newTree(nnkRaiseStmt, newEmptyNode())
+    )
+  )
+  let finallyStmt = newTree(nnkFinally, newStmtList(newCall(ident"dec", ident"txDepth")))
+  let tryStmt = newTree(nnkTryStmt, tryBody, exceptDb, exceptAny, finallyStmt)
+  blockStmts.add tryStmt
+  blockStmts.add okSym
+  result = newTree(nnkStmtListExpr, newTree(nnkBlockStmt, newEmptyNode(), blockStmts))
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList

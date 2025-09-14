@@ -190,7 +190,40 @@ The tests include additional samples of JSON parameters and raw SQL expressions.
 
 ## Transactions and Batching
 
-TODO!
+Use `transaction:` to run multiple queries atomically. The block commits on success and rolls back on any exception. Nesting is supported via savepoints. `tryTransaction:` behaves the same but returns `bool` (false on database errors) without raising.
+
+Examples:
+
+```nim
+# Commit on success
+transaction:
+  query:
+    insert person(id = ?(1), name = ?"alice", password = ?"p", email = ?"a@x", salt = ?"s", status = ?"ok")
+  query:
+    update thread(views = views + 1)
+    where id == ?(42)
+
+# Rollback on error
+let ok = tryTransaction:
+  query:
+    insert person(id = ?(2), name = ?"bob", password = ?"p", email = ?"b@x", salt = ?"s", status = ?"ok")
+  # Primary key violation => entire block is rolled back, ok = false
+  query:
+    insert person(id = ?(2), name = ?"duplicate", password = ?"p", email = ?"d@x", salt = ?"s", status = ?"x")
+
+# Nested transactions via savepoints
+transaction:
+  query:
+    insert person(id = ?(3), name = ?"carol", password = ?"p", email = ?"c@x", salt = ?"s", status = ?"ok")
+  let innerOk = tryTransaction:
+    # This will fail and roll back to the savepoint
+    query:
+      insert person(id = ?(3), name = ?"duplicate", password = ?"p", email = ?"d@x", salt = ?"s", status = ?"x")
+  doAssert innerOk == false
+  # Continue outer transaction normally
+```
+
+PostgreSQL and SQLite are supported. The macros use `BEGIN/COMMIT/ROLLBACK` for the outermost transaction and `SAVEPOINT/RELEASE/ROLLBACK TO` for nested scopes. 
 
 ## Reusable Procedures and Iterators
 

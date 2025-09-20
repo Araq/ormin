@@ -9,6 +9,8 @@ import macros, strutils
 import db_connector/db_common
 from os import parentDir, `/`
 
+import db_types
+
 # SQL dialect specific things:
 const
   equals = "="
@@ -36,6 +38,79 @@ var
     Function(name: "upper", arity: 1, typ: dbVarchar),
     Function(name: "replace", arity: 3, typ: dbVarchar)
   ]
+
+proc isVarargsType(n: NimNode): bool {.compileTime.} =
+  ## Checks if the provided type node encodes a varargs parameter.
+  case n.kind
+  of nnkBracketExpr:
+    if n.len > 0:
+      let head = n[0]
+      if head.kind in {nnkIdent, nnkSym} and head.strVal == "varargs":
+        return true
+  else:
+    discard
+  result = false
+
+proc typeNodeToDbKind(n: NimNode): DbTypeKind {.compileTime.} =
+  ## Maps the return type of an imported SQL function to DbTypeKind.
+  if n.kind == nnkEmpty:
+    return dbUnknown
+  if isVarargsType(n):
+    if n.len > 1:
+      return typeNodeToDbKind(n[1])
+    return dbUnknown
+  let name =
+    case n.kind
+    of nnkSym, nnkIdent:
+      n.strVal
+    else:
+      $n
+  return dbTypFromName(name)
+
+proc registerImportSqlFunction(name: string; arity: int; typ: DbTypeKind) {.compileTime.} =
+  ## Adds or updates a Function descriptor for vendor specific SQL routines.
+  let lname = name.toLowerAscii()
+  for f in mitems(functions):
+    if f.name.toLowerAscii() == lname and f.arity == arity:
+      f.typ = typ
+      return
+  let f = Function(name: name, arity: arity, typ: typ)
+  when defined(debugOrminDsl):
+    echo "registerImportSqlFunction: ", f
+  functions.add f
+
+macro importSql*(n: typed): untyped =
+  ## Registers a Nim proc as callable SQL function within the query DSL.
+  if n.kind notin {nnkProcDef, nnkFuncDef}:
+    macros.error("{.importSql.} can only be applied to proc or func definitions", n)
+  let params = n[3]
+  expectKind(params, nnkFormalParams)
+  var paramCount = 0
+  var hasVarargs = false
+  for i in 1..<params.len:
+    let identDefs = params[i]
+    expectKind(identDefs, nnkIdentDefs)
+    if identDefs.len < 3:
+      macros.error("unexpected parameter definition in {.importSql.}", identDefs)
+    let defaultValue = identDefs[^1]
+    if defaultValue.kind != nnkEmpty:
+      macros.error("{.importSql.} procs cannot declare default values", defaultValue)
+    let typeNode = identDefs[^2]
+    if isVarargsType(typeNode):
+      if hasVarargs:
+        macros.error("{.importSql.} supports only a single varargs parameter", identDefs)
+      if params.len > 2:
+        macros.error("varargs parameters cannot be combined with fixed parameters", identDefs)
+      if identDefs.len - 2 != 1:
+        macros.error("varargs parameter must declare exactly one identifier", identDefs)
+      hasVarargs = true
+    else:
+      paramCount += identDefs.len - 2
+  let arity = if hasVarargs: -1 else: paramCount
+  let fnName = n[0].strVal
+  let retKind = typeNodeToDbKind(params[0])
+  registerImportSqlFunction(fnName, arity, retKind)
+  result = newStmtList()
 
 type
   Env = seq[(int, string)]

@@ -22,6 +22,7 @@ let
   testDir = currentSourcePath.parentDir()
   sqlFile = testDir / sqlFileName
 
+proc substr(s: string; start, length: int): string {.importSql.}
 
 let
   min = -3
@@ -168,6 +169,11 @@ suite "boolean":
       produce json
     check res == %*seqs.mapIt(%*{"typboolean": toBool(it)})
 
+  test "importSql substr wrong type":
+    ## TODO: should this be allowed?
+    let res = query:
+      select tb_boolean(substr(typboolean, 1, 2))
+    echo "res: ", res
 
 let fs = [-3.14, 2.56, 10.45]
 
@@ -221,8 +227,16 @@ suite "float":
       select tb_float(abs(typfloat))
     check res == fs.mapIt(abs(it))
 
-
 let ss = ["one", "Two", "three", "第四", "four'th"]
+
+proc firstRunes(s: string; count: int): string =
+  result = ""
+  var i = 0
+  for r in s.runes:
+    if i >= count:
+      break
+    result.add(r.toUTF8)
+    inc i
 
 suite "string_insert":
   setup:
@@ -300,7 +314,21 @@ suite "string":
     let res = query:
       select tb_string(replace(typstring, "e", "o"))
     check res == ss.mapIt(it.replace("e", "o"))
+
+  test "importSql substr length 0":
+    let res = query:
+      select tb_string(substr(typstring, 1, 0))
+    let expected = ss.mapIt(firstRunes(it, 0))
+    check res == expected
     
+  test "importSql substr length no arg types checked":
+    # TODO: fixme!
+    # the `functions` array only contains the types of the return
+    # but sqlite doesn't really care...
+    let res = query:
+      select tb_string(substr(typstring, "1", 2))
+    let expected = ss.mapIt(firstRunes(it, 2))
+    check res == expected
 
 let js = [
   %*{"name": "tom", "age": 30},

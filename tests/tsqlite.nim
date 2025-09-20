@@ -24,6 +24,17 @@ let
               "dt2": dt2.format(jsonTimeFormat)}
 let insertSql =  sql"insert into tb_timestamp(dt1, dt2) values (?, ?)"
 
+proc blobFromBytes(bytes: openArray[int]): string =
+  result = newString(bytes.len)
+  for i, b in bytes:
+    result[i] = chr(b)
+
+let blobFixtures = [
+  blobFromBytes(@[0, 1, 2, 3, 4, 5, 6, 7]),
+  blobFromBytes(@[255, 128, 64, 32, 16, 8, 4, 2, 1]),
+  blobFromBytes(@[ord('O'), ord('R'), ord('M'), ord('I'), ord('N'), 0, 1, 2])
+]
+
 suite "timestamp_insert":
   setup:
     db.dropTable(sqlFile, "tb_timestamp")
@@ -94,3 +105,36 @@ suite "timestamp":
       where dt1 == %dtjson["dt1"]
       produce json
     check res == %*[dtjson]
+
+suite "blob_insert":
+  setup:
+    db.dropTable(sqlFile, "tb_blob")
+    db.createTable(sqlFile, "tb_blob")
+
+  test "insert parameters":
+    for blob in blobFixtures:
+      query:
+        insert tb_blob(typblob = ?blob)
+    check db.getValue(sql"select count(*) from tb_blob") == $blobFixtures.len
+
+suite "blob":
+  db.dropTable(sqlFile, "tb_blob")
+  db.createTable(sqlFile, "tb_blob")
+
+  for blob in blobFixtures:
+    query:
+      insert tb_blob(typblob = ?blob)
+  doAssert db.getValue(sql"select count(*) from tb_blob") == $blobFixtures.len
+
+  test "query":
+    let res = query:
+      select tb_blob(id, typblob)
+    check res.mapIt(it.typblob) == blobFixtures
+
+  test "where":
+    let target = blobFixtures[1]
+    let res = query:
+      select tb_blob(id, typblob)
+      where typblob == ?target
+    check res.len == 1
+    check res[0].typblob == target

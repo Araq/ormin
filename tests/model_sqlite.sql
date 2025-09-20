@@ -23,3 +23,8 @@ create table if not exists tb_timestamp(
 create table if not exists tb_json(
   typjson json not null
 );
+
+create table if not exists tb_blob(
+  id integer primary key,
+  typblob blob not null
+);

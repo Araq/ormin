@@ -11,6 +11,7 @@ type
   DbConn* = PSqlite3  ## encapsulates a database connection
 
   varcharType* = string
+  blobType* = string
   intType* = int
   floatType* = float
   boolType* = bool
@@ -36,7 +37,15 @@ template startBindings*(s: PStmt; n: int) =
 template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
   #when not (x is t):
   #  {.error: "type mismatch for query argument at position " & $idx.}
-  when t is int or t is int64 or t is bool:
+  when t is blobType:
+    let xs = x
+    let blobPtr = if xs.len == 0:
+        cast[pointer](nil)
+      else:
+        cast[pointer](unsafeAddr(xs[0]))
+    if bind_blob(s, idx.cint, blobPtr, xs.len.cint, SQLITE_STATIC) != SQLITE_OK:
+      dbError(db)
+  elif t is int or t is int64 or t is bool:
     if bind_int64(s, idx.cint, x.int64) != SQLITE_OK: dbError(db)
   elif t is string:
     if bind_text(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
@@ -130,8 +139,15 @@ proc fillString(dest: var string; src: cstring; srcLen: int) =
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
   let srcLen = column_bytes(s, idx.cint)
-  let src = column_text(s, idx.cint)
-  fillString(dest, src, srcLen)
+  when t is blobType:
+    let src = column_blob(s, idx.cint)
+    if srcLen == 0:
+      setLen(dest, 0)
+    else:
+      fillString(dest, cast[cstring](src), srcLen)
+  else:
+    let src = column_text(s, idx.cint)
+    fillString(dest, src, srcLen)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
@@ -176,8 +192,15 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc[string]; name: string) =
   let dest = newJString("")
   let srcLen = column_bytes(s, idx.cint)
-  let src = column_text(s, idx.cint)
-  fillString(dest.str, src, srcLen)
+  when t is blobType:
+    let src = column_blob(s, idx.cint)
+    if srcLen == 0:
+      setLen(dest.str, 0)
+    else:
+      fillString(dest.str, cast[cstring](src), srcLen)
+  else:
+    let src = column_text(s, idx.cint)
+    fillString(dest.str, src, srcLen)
   obj[name] = dest
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;

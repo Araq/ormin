@@ -24,10 +24,11 @@ let
               "dt2": dt2.format(jsonTimeFormat)}
 let insertSql =  sql"insert into tb_timestamp(dt1, dt2) values (?, ?)"
 
-proc blobFromBytes(bytes: openArray[int]): string =
-  result = newString(bytes.len)
+proc blobFromBytes(bytes: openArray[int]): seq[byte] =
+  result = newSeq[byte](bytes.len)
   for i, b in bytes:
-    result[i] = chr(b)
+    doAssert b >= 0 and b <= 255
+    result[i] = byte(b)
 
 let blobFixtures = [
   blobFromBytes(@[0, 1, 2, 3, 4, 5, 6, 7]),

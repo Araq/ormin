@@ -11,7 +11,7 @@ type
   DbConn* = PSqlite3  ## encapsulates a database connection
 
   varcharType* = string
-  blobType* = string
+  blobType* = seq[byte]
   intType* = int
   floatType* = float
   boolType* = bool
@@ -84,7 +84,7 @@ template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
                        t: typedesc[string]) =
   doAssert x.kind == JString
   let xs = x.str
-  if bind_blob(s, idx.cint, cstring(xs), xs.len.cint, SQLITE_STATIC) != SQLITE_OK:
+  if bind_text(s, idx.cint, cstring(xs), xs.len.cint, SQLITE_STATIC) != SQLITE_OK:
     dbError(db)
 
 template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
@@ -127,27 +127,19 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int64;
                      t: typedesc; name: string) =
   dest = column_int64(s, idx.cint)
 
-proc fillString(dest: var string; src: cstring; srcLen: int) =
-  if srcLen == 0: return
-  when defined(nimNoNilSeqs):
-    setLen(dest, srcLen)
-  else:
-    if dest.isNil: dest = newString(srcLen)
-    else: setLen(dest, srcLen)
-  copyMem(unsafeAddr(dest[0]), src, srcLen)
-
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
   let srcLen = column_bytes(s, idx.cint)
-  when t is blobType:
-    let src = column_blob(s, idx.cint)
-    if srcLen == 0:
-      setLen(dest, 0)
-    else:
-      fillString(dest, cast[cstring](src), srcLen)
-  else:
-    let src = column_text(s, idx.cint)
-    fillString(dest, src, srcLen)
+  let src = column_text(s, idx.cint)
+  setLen(dest, srcLen)
+  copyMem(unsafeAddr(dest[0]), src, srcLen)
+
+template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var blobType;
+                     t: typedesc; name: string) =
+  let srcLen = column_bytes(s, idx.cint)
+  let src = column_blob(s, idx.cint)
+  setLen(dest, srcLen)
+  copyMem(unsafeAddr(dest[0]), src, srcLen)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
@@ -192,20 +184,24 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc[string]; name: string) =
   let dest = newJString("")
   let srcLen = column_bytes(s, idx.cint)
-  when t is blobType:
-    let src = column_blob(s, idx.cint)
-    if srcLen == 0:
-      setLen(dest.str, 0)
-    else:
-      fillString(dest.str, cast[cstring](src), srcLen)
-  else:
-    let src = column_text(s, idx.cint)
-    fillString(dest.str, src, srcLen)
+  let src = column_text(s, idx.cint)
+  fillString(dest.str, src, srcLen)
   obj[name] = dest
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc[int|int64]; name: string) =
   obj[name] = newJInt(column_int64(s, idx.cint))
+
+template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
+                     t: typedesc[blobType]; name: string) =
+  let srcLen = column_bytes(s, idx.cint)
+  let src = column_blob(s, idx.cint)
+  var data: blobType
+  fillBytes(data, src, srcLen)
+  let arr = newJArray()
+  for b in data:
+    arr.add newJInt(int(b))
+  obj[name] = arr
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc[float64]; name: string) =

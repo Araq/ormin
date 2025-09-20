@@ -229,15 +229,6 @@ suite "float":
 
 let ss = ["one", "Two", "three", "第四", "four'th"]
 
-proc firstRunes(s: string; count: int): string =
-  result = ""
-  var i = 0
-  for r in s.runes:
-    if i >= count:
-      break
-    result.add(r.toUTF8)
-    inc i
-
 suite "string_insert":
   setup:
     db.dropTable(sqlFile, "tb_string")
@@ -318,7 +309,7 @@ suite "string":
   test "importSql substr length 0":
     let res = query:
       select tb_string(substr(typstring, 1, 0))
-    let expected = ss.mapIt(firstRunes(it, 0))
+    let expected = ss.mapIt($(toRunes(it)[0..<0]))
     check res == expected
     
   test "importSql substr length no arg types checked":
@@ -327,7 +318,7 @@ suite "string":
     # but sqlite doesn't really care...
     let res = query:
       select tb_string(substr(typstring, "1", 2))
-    let expected = ss.mapIt(firstRunes(it, 2))
+    let expected = ss.mapIt($(toRunes(it)[0..<2]))
     check res == expected
 
 let js = [

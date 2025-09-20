@@ -6,6 +6,7 @@ import streams, strutils, os, parseopt, tables
 import db_connector/db_common
 
 import ./parsesql_tmp
+import ../ormin/db_types
 
 #import compiler / [ast, renderer]
 

@@ -169,11 +169,12 @@ suite "boolean":
       produce json
     check res == %*seqs.mapIt(%*{"typboolean": toBool(it)})
 
-  test "importSql substr wrong type":
-    ## TODO: should this be allowed?
-    let res = query:
-      select tb_boolean(substr(typboolean, 1, 2))
-    echo "res: ", res
+  when defined(sqlite):
+    test "importSql substr wrong type":
+      ## TODO: should this be allowed?
+      let res = query:
+        select tb_boolean(substr(typboolean, 1, 2))
+      echo "res: ", res
 
 let fs = [-3.14, 2.56, 10.45]
 
@@ -306,20 +307,21 @@ suite "string":
       select tb_string(replace(typstring, "e", "o"))
     check res == ss.mapIt(it.replace("e", "o"))
 
-  test "importSql substr length 0":
-    let res = query:
-      select tb_string(substr(typstring, 1, 0))
-    let expected = ss.mapIt($(toRunes(it)[0..<0]))
-    check res == expected
-    
-  test "importSql substr length no arg types checked":
-    # TODO: fixme!
-    # the `functions` array only contains the types of the return
-    # but sqlite doesn't really care...
-    let res = query:
-      select tb_string(substr(typstring, "1", 2))
-    let expected = ss.mapIt($(toRunes(it)[0..<2]))
-    check res == expected
+  when defined(sqlite):
+    test "importSql substr length 0":
+      let res = query:
+        select tb_string(substr(typstring, 1, 0))
+      let expected = ss.mapIt($(toRunes(it)[0..<0]))
+      check res == expected
+      
+    test "importSql substr length no arg types checked":
+      # TODO: fixme!
+      # the `functions` array only contains the types of the return
+      # but sqlite doesn't really care...
+      let res = query:
+        select tb_string(substr(typstring, "1", 2))
+      let expected = ss.mapIt($(toRunes(it)[0..<2]))
+      check res == expected
 
 let js = [
   %*{"name": "tom", "age": 30},

@@ -1,5 +1,5 @@
 create table if not exists thread(
-  id integer primary key,
+  id serial primary key,
   name varchar(100) not null,
   views integer not null,
   modified timestamp not null default CURRENT_TIMESTAMP
@@ -8,7 +8,7 @@ create table if not exists thread(
 create unique index if not exists ThreadNameIx on thread (name);
 
 create table if not exists person(
-  id integer primary key,
+  id serial primary key,
   name varchar(20) not null,
   password varchar(32) not null,
   email varchar(30) not null,
@@ -22,7 +22,7 @@ create table if not exists person(
 create unique index if not exists UserNameIx on person (name);
 
 create table if not exists post(
-  id integer primary key,
+  id serial primary key,
   author integer not null,
   ip varchar(20) not null,
   header varchar(100) not null,
@@ -35,7 +35,7 @@ create table if not exists post(
 );
 
 create table if not exists session(
-  id integer primary key,
+  id serial primary key,
   ip varchar(20) not null,
   password varchar(32) not null,
   userid integer not null,
@@ -44,7 +44,7 @@ create table if not exists session(
 );
 
 create table if not exists antibot(
-  id integer primary key,
+  id serial primary key,
   ip varchar(20) not null,
   answer varchar(30) not null,
   created timestamp not null default CURRENT_TIMESTAMP

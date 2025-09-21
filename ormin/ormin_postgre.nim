@@ -212,14 +212,14 @@ template startQuery*(db: DbConn; s: PStmt) =
             nil, nil, nil, 0)
   if pqResultStatus(queryResult) == PGRES_COMMAND_OK:
     discard # insert does not returns data in pg
-  elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: dbError(db)
+  elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: ormin_postgre.dbError(db)
   var queryI {.inject.} = cint(-1)
   var queryLen {.inject.} = pqntuples(queryResult)
 
 template stopQuery*(db: DbConn; s: PStmt) =
   pqclear(queryResult)
 
-template stepQuery*(db: DbConn; s: PStmt; returnsData: int): bool =
+template stepQuery*(db: DbConn; s: PStmt; returnsData: bool): bool =
   inc queryI
   queryI < queryLen
 

@@ -217,6 +217,14 @@ for row in db.postsIter(userId):
 
 Both forms accept parameters matching the `?`/`%` placeholders and produce the same return types as an inline `query` block.
 
+## Running Arbitrary SQL
+
+The standard `db_connector` APIs can be imported and used. For example:
+
+```nim
+discard db.getValue(sql"select setval('antibot_id_seq', 10, false)")
+```
+
 ## Additional Facilities
 
 - **Protocol DSL** – The `protocol` macro lets you describe paired server/client handlers that communicate via JSON messages. Sections use keywords like `recv`, `broadcast` and `send`, and every server block must be mirrored by a client block. The chat example demonstrates this code generation.

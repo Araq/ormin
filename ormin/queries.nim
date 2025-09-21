@@ -143,11 +143,12 @@ proc checkBool(a: DbType; n: NimNode) =
     macros.error "expected type 'bool', but got: " & $a, n
 
 proc checkInt(a: DbType; n: NimNode) =
-  if a.kind != dbInt:
+  if a.kind notin {dbInt, dbSerial}:
     macros.error "expected type 'int', but got: " & $a, n
 
 proc checkCompatible(a, b: DbType; n: NimNode) =
-  if a.kind != b.kind:
+  # Treat serial and int as compatible
+  if not (a.kind == b.kind or (a.kind == dbSerial and b.kind == dbInt) or (a.kind == dbInt and b.kind == dbSerial)):
     macros.error "incompatible types: " & $a & " and " & $b, n
 
 proc checkCompatibleSet(a, b: DbType; n: NimNode) =
@@ -454,6 +455,8 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   let prepare = newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit(sql)))
 
   let body = newStmtList()
+  # Ensure the prepared statement is created before binding/starting the query
+  body.add prepare
 
   var finalParams = newNimNode(nnkFormalParams)
   if q.retTypeIsJson:
@@ -869,14 +872,11 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     if b.kind == nnkCommand: queryh(b, q)
     else: macros.error "illformed query", b
   let sql = queryAsString(q, body)
-  let prepStmt = genSym(nskVar)
+  let prepStmt = genSym(nskLet)
   let res = genSym(nskVar)
-  let prepStmtCall = newCall(bindSym"prepareStmt", ident"db", newLit sql)
   result = newTree(
     if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
-    # really hack-ish
-    newGlobalVar(prepStmt, newCall(bindSym"typeof", prepStmtCall), newEmptyNode()),
-    getAst(once(newAssignment(prepStmt, prepStmtCall)))
+    newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   let rtyp = if q.retType.len > 1 or q.retType.len == 0:
     q.retType

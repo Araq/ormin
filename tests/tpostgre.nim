@@ -1,16 +1,21 @@
 import unittest, json, strutils, macros, times, os, sequtils
-import db_connector/postgres
+# Postgres connection handled through ormin_postgre backend
+from db_connector/db_postgres import exec, getValue
 import ormin
+import ormin/ormin_postgre as ormin_postgre
+# import db_connector/db_postgres as db_postgres
+import ormin/db_utils
 
-from db_connector/postgres import exec, getValue
-import ./utils
+when defined(macosx):
+  {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
+
 
 importModel(DbBackend.postgre, "model_postgre")
 
 let
-  db {.global.} = open("localhost", "test", "test", "test")
+  db {.global.} = ormin_postgre.open("localhost", "test", "test", "test_ormin")
   testDir = currentSourcePath.parentDir()
-  sqlFile = testDir / "model_postgre.sql"
+  sqlFile = Path(testDir / "model_postgre.sql")
 
 
 suite "Test special database types and functions of postgre":

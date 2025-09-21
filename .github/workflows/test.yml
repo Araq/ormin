@@ -1,10 +1,26 @@
 name: CI
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: test
+          POSTGRES_DB: test_ormin
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     strategy:
       matrix:
         nim:
@@ -33,27 +49,18 @@ jobs:
       with:
         nim-version: ${{ matrix.nim }}
 
-    - name: Setup postgresql
-      uses: harmon758/postgresql-action@v1
-      with: 
-        postgresql version: '14'
-        postgresql user: 'test'
-        postgresql password: 'test'
-        postgresql db: 'test'
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libpcre3-dev
-
     - name: Install dependencies
       run: |
         nimble --useSystemNim install -d
         nimble --useSystemNim install karax -y
         nimble --useSystemNim install jester -y
+        nimble --useSystemNim install websocket -y
       
-    - name: Run test
+    - name: Run test sqlite
       run: nimble --useSystemNim test
+
+    - name: Run test postgres
+      run: nimble --useSystemNim test_postgres
       env:
         PGPASSWORD: test
 

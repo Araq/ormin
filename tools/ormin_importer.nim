@@ -5,7 +5,7 @@
 import streams, strutils, os, parseopt, tables
 import db_connector/db_common
 
-import ./parsesql_tmp
+import ../ormin/parsesql_tmp
 
 #import compiler / [ast, renderer]
 
@@ -125,17 +125,40 @@ proc collectTables(n: SqlNode; t: var KnownTables) =
                           typ: typ,
                           primaryKey: hasAttribute(it, {nkPrimaryKey}),
                           refs: hasRefs(it))
+    # Handle table-level foreign keys, including composite FKs
     for i in 1..<n.len:
       let it = n[i]
       if it.kind == nkForeignKey:
-        var r = it[1]
-        doAssert r.kind == nkReferences
-        r = r[0]
-        doAssert r.kind == nkCall
-        for c in mitems(cols):
-          if cmpIgnoreCase(c.name, it[0].strVal) == 0:
-            c.refs = (r[0].strVal, r[1].strVal)
-            break
+        # nkForeignKey children layout (from parser):
+        #   - one or more nkIdent nodes for local columns
+        #   - one nkReferences node containing a nkColumnReference
+        var refNode: SqlNode = nil
+        var localCols: seq[string] = @[]
+        for j in 0..<it.len:
+          let child = it[j]
+          if child.kind == nkReferences:
+            refNode = child
+          elif child.kind == nkIdent:
+            localCols.add(child.strVal)
+        if refNode.isNil: continue
+        var r = refNode[0]
+        # r can be nkColumnReference(table, col1, col2, ...) or a simple call
+        var refTable = ""
+        var refCols: seq[string] = @[]
+        if r.kind == nkColumnReference or r.kind == nkCall:
+          # first child is the table name
+          refTable = r[0].strVal
+          for k in 1..<r.len:
+            refCols.add(r[k].strVal)
+        # Map each local column to corresponding referenced column
+        let pairCount = min(localCols.len, refCols.len)
+        for k in 0..<pairCount:
+          let localName = localCols[k]
+          let targetCol = refCols[k]
+          for c in mitems(cols):
+            if cmpIgnoreCase(c.name, localName) == 0:
+              c.refs = (refTable, targetCol)
+              break
     t[tablename] = cols
   else:
     for i in 0..<n.len: collectTables(n[i], t)

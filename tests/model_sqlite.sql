@@ -15,10 +15,6 @@ create table if not exists tb_string(
   typstring text not null
 );
 
-create table if not exists tb_blob(
-  payload blob not null
-);
-
 create table if not exists tb_timestamp(
   dt1 timestamp not null,
   dt2 timestamp not null
@@ -26,4 +22,9 @@ create table if not exists tb_timestamp(
 
 create table if not exists tb_json(
   typjson json not null
+);
+
+create table if not exists tb_blob(
+  id integer primary key,
+  typblob blob not null
 );

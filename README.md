@@ -195,8 +195,10 @@ Use the `{.importSql.}` pragma to tell Ormin about additional SQL functions that
 ```nim
 proc substr(s: string; start, length: int): string {.importSql.}
 
+let name = "foo"
 let rows = query:
   select tb_string(substr(typstring, 1, 5))
+  where substr(typstring, 1, 5) == ?name
 ```
 
 Imported functions participate in compile-time checking for arity and return type so they can be composed with regular Ormin expressions.

@@ -26,3 +26,4 @@ examples/tweeter/src/tweeterdeps/
 deps/
 nim.cfg
 .nimcache
+tests/tdb_utils

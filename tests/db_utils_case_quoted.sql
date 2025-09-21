@@ -1,0 +1,18 @@
+-- lower case, upper case, and quoted table names
+  create table lower_table (
+    id integer primary key
+  );
+
+  CREATE TABLE UPPER_TABLE (
+    id integer primary key
+  );
+
+  -- std sql quoted table name
+  create table "Quoted Table" (
+    id integer primary key
+  );
+
+  -- sqlite quoted table name
+  create table `Quoted Table2` (
+    id integer primary key
+  );

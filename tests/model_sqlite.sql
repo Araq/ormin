@@ -36,4 +36,8 @@ create table if not exists tb_composite_fk(
   fk1 integer not null,
   fk2 integer not null,
   foreign key (fk1, fk2) references tb_composite_pk(pk1, pk2)
+
+create table if not exists tb_blob(
+  id integer primary key,
+  typblob blob not null
 );

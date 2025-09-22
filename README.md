@@ -188,6 +188,23 @@ query:
 
 The tests include additional samples of JSON parameters and raw SQL expressions.
 
+### Custom SQL Functions
+
+Use the `{.importSql.}` pragma to tell Ormin about additional SQL functions that your database provides. Declare a Nim proc or func that mirrors the SQL signature and mark it with the pragma; the declaration does not need an implementation because Ormin only uses it to register the function for the query DSL.
+
+```nim
+proc substr(s: string; start, length: int): string {.importSql.}
+
+let name = "foo"
+let rows = query:
+  select tb_string(substr(typstring, 1, 5))
+  where substr(typstring, 1, 5) == ?name
+```
+
+Imported functions participate in compile-time checking for arity and return type so they can be composed with regular Ormin expressions.
+
+**Limitation:** argument types are currently not validated, so using mismatched parameter types still compiles—ensure the arguments you pass match what the underlying SQL function expects.
+
 ## Transactions and Batching
 
 TODO!

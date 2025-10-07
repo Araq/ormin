@@ -1111,45 +1111,40 @@ macro query*(body: untyped): untyped =
     var q = newQueryBuilder()
     result = queryImpl(q, body, false, false)
   else:
-    # Build: evaluate each group; for groups that do not naturally
-    # return a value (e.g. bare INSERT/UPDATE/DELETE), synthesize
-    # a useful return:
-    # - INSERT with explicit primary key: return the inserted key value
-    # - otherwise (future): could return affected rows
+    # Evaluate each group in order. Only include groups that produce
+    # a value in the aggregated result; execute bare statements but
+    # do not include them in the returned tuple. If only one group
+    # produces a value, return that value directly (not a 1-tuple).
     var stmts = newStmtList()
     var tupleElems: seq[NimNode] = @[]
     for g in groups:
       var q = newQueryBuilder()
       let expr = queryImpl(q, g, false, false)
-      let tmp = genSym(nskLet, "qres")
-      # Determine if this query returns a value already
-      var returnsVal = q.retType.len > 0 or q.kind == qkInsertReturning
+      let returnsVal = q.retType.len > 0 or q.kind == qkInsertReturning
       if returnsVal:
+        let tmp = genSym(nskLet, "qres")
         stmts.add newLetStmt(tmp, expr)
+        tupleElems.add tmp
       else:
-        # Synthesize a return value. For INSERT, prefer explicit 'id' assignment
-        var retNode: NimNode = newEmptyNode()
-        if q.kind in {qkInsert, qkReplace}:
-          for p in q.insertedValues:
-            if cmpIgnoreCase(p[0], "id") == 0:
-              retNode = p[1]
-              break
-        if retNode.kind == nnkEmpty:
-          # Fallback: zero when no obvious value (can extend to affected rows)
-          retNode = newLit(0)
-        var innerList = newStmtList()
-        # Flatten 'expr' (which is a StmtList/StmtListExpr) into 'innerList'
+        # Just execute the statement list to preserve side effects
         for i in 0 ..< expr.len:
-          innerList.add expr[i]
-        innerList.add retNode
-        let blk = newTree(nnkBlockExpr, newEmptyNode(), innerList)
-        stmts.add newLetStmt(tmp, blk)
-      tupleElems.add tmp
-    let tup = newTree(nnkPar)
-    for e in tupleElems: tup.add e
-    result = newTree(nnkStmtListExpr)
-    for s in stmts: result.add s
-    result.add tup
+          stmts.add expr[i]
+    if tupleElems.len == 0:
+      # Only side effects; return statements only
+      result = newStmtList()
+      for s in stmts: result.add s
+    elif tupleElems.len == 1:
+      # Return the single value directly
+      result = newTree(nnkStmtListExpr)
+      for s in stmts: result.add s
+      result.add tupleElems[0]
+    else:
+      # Return a tuple of values
+      let tup = newTree(nnkPar)
+      for e in tupleElems: tup.add e
+      result = newTree(nnkStmtListExpr)
+      for s in stmts: result.add s
+      result.add tup
   when defined(debugOrminDsl):
     macros.hint("Ormin Query: " & repr(result), body)
 

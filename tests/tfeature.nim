@@ -648,15 +648,16 @@ suite "query":
 
   test "insert no return and query":
     # possible example for multiple queries
-    let id = 11
+    let id1 = 11
+    let id2 = 12
     let res = query:
-      insert person(id = ?id, name = "ioannis", password = "fake", email = "ioannis@example.com", salt = "salt7", status = "ok")
+      insert person(id = ?id1, name = "ioannis", password = "fake", email = "ioannis@example.com", salt = "salt7", status = "ok")
+      insert person(id = ?id2, name = "ioannis", password = "fake", email = "ioannis@example.com", salt = "salt7", status = "ok")
       select person(id)
-      where id == ?id
-    # Compare against the equivalent individual queries to avoid
-    # depending on prior test mutations of the dataset.
+      where id == ?id2
+    # Only the query result should be returned in aggregation,
+    # bare insert is executed but not part of the result.
     let exp2 = query:
       select person(id)
-      where id == ?id
-    check res == (id, exp2)
-
+      where id == ?id2
+    check res == exp2

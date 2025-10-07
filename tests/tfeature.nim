@@ -611,3 +611,14 @@ suite "query":
       where id == ?id
     check res[0] != res2[0]
     check res[0].toUpper() == res2[0]
+
+  test "multiple queries":
+    # possible example for multiple queries
+    let id1 = 3
+    let id2 = 4
+    let res = query:
+      select person(name) where id == ?id1
+      select person(id) where id == ?id2
+
+    check res == (@["john3"], @[4])
+      

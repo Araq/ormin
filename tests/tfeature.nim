@@ -648,7 +648,7 @@ suite "query":
 
   test "insert no return and query":
     # possible example for multiple queries
-    let id = 7
+    let id = 11
     let res = query:
       insert person(id = ?id, name = "ioannis", password = "fake", email = "ioannis@example.com", salt = "salt7", status = "ok")
       select person(id)
@@ -659,5 +659,4 @@ suite "query":
       select person(id)
       where id == ?id
     check res == (id, exp2)
-
 

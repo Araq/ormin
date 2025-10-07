@@ -1111,19 +1111,42 @@ macro query*(body: untyped): untyped =
     var q = newQueryBuilder()
     result = queryImpl(q, body, false, false)
   else:
-    # Build: let r0 = (queryImpl group0); let r1 = (queryImpl group1); ...; (r0, r1, ...)
+    # Build: evaluate each group; for groups that do not naturally
+    # return a value (e.g. bare INSERT/UPDATE/DELETE), synthesize
+    # a useful return:
+    # - INSERT with explicit primary key: return the inserted key value
+    # - otherwise (future): could return affected rows
     var stmts = newStmtList()
     var tupleElems: seq[NimNode] = @[]
     for g in groups:
       var q = newQueryBuilder()
       let expr = queryImpl(q, g, false, false)
       let tmp = genSym(nskLet, "qres")
-      stmts.add newLetStmt(tmp, expr)
+      # Determine if this query returns a value already
+      var returnsVal = q.retType.len > 0 or q.kind == qkInsertReturning
+      if returnsVal:
+        stmts.add newLetStmt(tmp, expr)
+      else:
+        # Synthesize a return value. For INSERT, prefer explicit 'id' assignment
+        var retNode: NimNode = newEmptyNode()
+        if q.kind in {qkInsert, qkReplace}:
+          for p in q.insertedValues:
+            if cmpIgnoreCase(p[0], "id") == 0:
+              retNode = p[1]
+              break
+        if retNode.kind == nnkEmpty:
+          # Fallback: zero when no obvious value (can extend to affected rows)
+          retNode = newLit(0)
+        var innerList = newStmtList()
+        # Flatten 'expr' (which is a StmtList/StmtListExpr) into 'innerList'
+        for i in 0 ..< expr.len:
+          innerList.add expr[i]
+        innerList.add retNode
+        let blk = newTree(nnkBlockExpr, newEmptyNode(), innerList)
+        stmts.add newLetStmt(tmp, blk)
       tupleElems.add tmp
     let tup = newTree(nnkPar)
-    for e in tupleElems:
-      tup.add e
-    # Return a statement list expression so it can be used inline.
+    for e in tupleElems: tup.add e
     result = newTree(nnkStmtListExpr)
     for s in stmts: result.add s
     result.add tup

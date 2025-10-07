@@ -1,8 +1,9 @@
 import unittest, json, strutils, macros, times, os, sequtils
 # Postgres connection handled through ormin_postgre backend
+from db_connector/db_postgres import exec, getValue
 import ormin
 import ormin/ormin_postgre as ormin_postgre
-import db_connector/db_postgres as db_postgres
+# import db_connector/db_postgres as db_postgres
 import ormin/db_utils
 
 when defined(macosx):
@@ -14,7 +15,7 @@ importModel(DbBackend.postgre, "model_postgre")
 let
   db {.global.} = ormin_postgre.open("localhost", "test", "test", "test_ormin")
   testDir = currentSourcePath.parentDir()
-  sqlFile = testDir / "model_postgre.sql"
+  sqlFile = Path(testDir / "model_postgre.sql")
 
 
 suite "Test special database types and functions of postgre":

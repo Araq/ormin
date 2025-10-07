@@ -17,6 +17,7 @@ task test, "Run all test suite":
   exec "nim c -f -r tests/tfeature"
   exec "nim c -f -r tests/tcommon"
   exec "nim c -f -r tests/tsqlite"
+  exec "nim c -f -r tests/tdb_utils"
 
 task setup_postgres, "Ensure local Postgres has test DB/user":
   # Use a simple script to avoid Nim/psql quoting pitfalls
@@ -30,9 +31,9 @@ task test_postgres, "Run PostgreSQL test suite":
   exec "./tools/ormin_importer tests/forum_model_postgres.sql"
   exec "./tools/ormin_importer tests/model_postgre.sql"
 
-  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
-  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
-  exec "nim c -f -d:nimDebugDlOpen -r tests/tpostgre"
+  exec "nim c -f -d:nimDebugDlOpen -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
+  exec "nim c -f -d:nimDebugDlOpen -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
+  exec "nim c -f -d:nimDebugDlOpen -f -d:nimDebugDlOpen -r -d:postgre tests/tpostgre"
 
 task buildexamples, "Build examples: chat and forum":
   buildimporterTask()

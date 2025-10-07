@@ -25,7 +25,7 @@ else:
   var memoryPath = testDir & "/" & ":memory:"
   let db {.global.} = open(memoryPath, "", "", "")
 
-var sqlFilePath = testDir & "/" & sqlFileName
+var sqlFilePath = Path(testDir & "/" & sqlFileName)
 
 type
   Person = tuple[id: int,
@@ -383,10 +383,11 @@ suite "query":
     check res.sortedByIt(it) == expectedpost.sortedByIt(it)
 
   test "subquery_nest3":
-    let res = query:
+    var res = query:
       select thread(id)
       where id in (select post(thread) where author in
         (select person(id) where id in {1, 2}))
+    res.sort()
     check res == postdata.filterIt(it.author in [1, 2])
                         .mapIt(it.thread)
                         .sortedByIt(it)

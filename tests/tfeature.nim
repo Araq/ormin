@@ -631,19 +631,33 @@ suite "query":
       where id == ?id2
     check res == (exp1, exp2)
       
-  # test "multiple queries":
-  #   # possible example for multiple queries
-  #   let id1 = 3
-  #   let id2 = 4
-  #   let res = query:
-  #     insert person(name) where id == ?id1
-  #     select person(id) where id == ?id2
-  #   # Compare against the equivalent individual queries to avoid
-  #   # depending on prior test mutations of the dataset.
-  #   let exp1 = query:
-  #     select person(name) where id == ?id1
-  #   let exp2 = query:
-  #     select person(id) where id == ?id2
-  #   check res == (exp1, exp2)
-      
+  test "insert and query":
+    # possible example for multiple queries
+    let id = 7
+    let res = query:
+      insert person(id = ?id, name = "ioannis", password = "fake", email = "ioannis@example.com", salt = "salt7", status = "ok")
+      returning id
+      select person(id)
+      where id == ?id
+    # Compare against the equivalent individual queries to avoid
+    # depending on prior test mutations of the dataset.
+    let exp2 = query:
+      select person(id)
+      where id == ?id
+    check res == (id, exp2)
+
+  test "insert no return and query":
+    # possible example for multiple queries
+    let id = 7
+    let res = query:
+      insert person(id = ?id, name = "ioannis", password = "fake", email = "ioannis@example.com", salt = "salt7", status = "ok")
+      select person(id)
+      where id == ?id
+    # Compare against the equivalent individual queries to avoid
+    # depending on prior test mutations of the dataset.
+    let exp2 = query:
+      select person(id)
+      where id == ?id
+    check res == (id, exp2)
+
 

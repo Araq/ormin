@@ -617,8 +617,33 @@ suite "query":
     let id1 = 3
     let id2 = 4
     let res = query:
-      select person(name) where id == ?id1
-      select person(id) where id == ?id2
-
-    check res == (@["john3"], @[4])
+      select person(name)
+      where id == ?id1
+      select person(id)
+      where id == ?id2
+    # Compare against the equivalent individual queries to avoid
+    # depending on prior test mutations of the dataset.
+    let exp1 = query:
+      select person(name)
+      where id == ?id1
+    let exp2 = query:
+      select person(id)
+      where id == ?id2
+    check res == (exp1, exp2)
       
+  # test "multiple queries":
+  #   # possible example for multiple queries
+  #   let id1 = 3
+  #   let id2 = 4
+  #   let res = query:
+  #     insert person(name) where id == ?id1
+  #     select person(id) where id == ?id2
+  #   # Compare against the equivalent individual queries to avoid
+  #   # depending on prior test mutations of the dataset.
+  #   let exp1 = query:
+  #     select person(name) where id == ?id1
+  #   let exp2 = query:
+  #     select person(id) where id == ?id2
+  #   check res == (exp1, exp2)
+      
+

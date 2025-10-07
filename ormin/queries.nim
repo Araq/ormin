@@ -1070,8 +1070,63 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
     result.add res
 
 macro query*(body: untyped): untyped =
-  var q = newQueryBuilder()
-  result = queryImpl(q, body, false, false)
+  ## Support single or multiple queries within one `query:` block.
+  ## When multiple top-level `select/insert/update/replace/delete` commands
+  ## are present, execute each as an independent query and return a tuple
+  ## with their results in order. Example:
+  ##   let res = query:
+  ##     select person(name) where id == ?id1
+  ##     select person(id)   where id == ?id2
+  ##   # res == (@["john3"], @[4])
+
+  expectKind(body, nnkStmtList)
+  expectMinLen(body, 1)
+
+  # Partition the body into groups, each starting with a new top-level
+  # query command (select/insert/update/replace/delete). The remaining
+  # clauses like where/limit/groupby/etc. stay attached to the current group.
+  var groups: seq[NimNode] = @[]
+  var current = newStmtList()
+  proc isQueryStart(n: NimNode): bool {.compileTime.} =
+    if n.kind in nnkCallKinds and n.len > 0:
+      let h = n[0]
+      if h.kind in {nnkIdent, nnkSym, nnkAccQuoted}:
+        case h.strVal.toLowerAscii()
+        of "select", "insert", "update", "replace", "delete":
+          return true
+    return false
+
+  for b in body:
+    if b.kind != nnkCommand:
+      macros.error("illformed query", b)
+    if isQueryStart(b):
+      if current.len > 0:
+        groups.add current
+        current = newStmtList()
+    current.add b
+  if current.len > 0:
+    groups.add current
+
+  if groups.len <= 1:
+    var q = newQueryBuilder()
+    result = queryImpl(q, body, false, false)
+  else:
+    # Build: let r0 = (queryImpl group0); let r1 = (queryImpl group1); ...; (r0, r1, ...)
+    var stmts = newStmtList()
+    var tupleElems: seq[NimNode] = @[]
+    for g in groups:
+      var q = newQueryBuilder()
+      let expr = queryImpl(q, g, false, false)
+      let tmp = genSym(nskLet, "qres")
+      stmts.add newLetStmt(tmp, expr)
+      tupleElems.add tmp
+    let tup = newTree(nnkPar)
+    for e in tupleElems:
+      tup.add e
+    # Return a statement list expression so it can be used inline.
+    result = newTree(nnkStmtListExpr)
+    for s in stmts: result.add s
+    result.add tup
   when defined(debugOrminDsl):
     macros.hint("Ormin Query: " & repr(result), body)
 

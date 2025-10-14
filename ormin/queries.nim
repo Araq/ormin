@@ -1124,7 +1124,7 @@ macro tryQuery*(body: untyped): untyped =
 
 template txBegin*(sp: untyped) =
   if isTopTx():
-    execNoRowsLoose("begin")
+    execNoRowsLoose("begin transaction")
   else:
     execNoRowsLoose("savepoint " & sp)
 
@@ -1145,10 +1145,7 @@ template transaction*(body: untyped) =
   ## rolls back on any exception and rethrows. Supports nesting via savepoints.
   block:
     incTxDepth()
-    when dbBackend == DbBackend.postgre:
-      let sp = "SAVEPOINT ormin_tx_" & $txDepth
-    else:
-      let sp = "ormin_tx_" & $txDepth
+    let sp = "ormin_tx_" & $txDepth
 
     try:
       txBegin(sp)
@@ -1167,10 +1164,7 @@ template tryTransaction*(body: untyped): bool =
   ## Same as `transaction` but returns bool and swallows DbError.
   block:
     incTxDepth()
-    when dbBackend == DbBackend.postgre:
-      let sp = "SAVEPOINT ormin_tx_" & $txDepth
-    else:
-      let sp = "ormin_tx_" & $txDepth
+    let sp = "ormin_tx_" & $txDepth
 
     var orminOk = true
     try:

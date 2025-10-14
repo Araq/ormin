@@ -1122,99 +1122,66 @@ macro tryQuery*(body: untyped): untyped =
 # Transactions DSL
 # -------------------------
 
+template txBegin*(sp: untyped) =
+  if isTopTx():
+    execNoRowsLoose("begin")
+  else:
+    execNoRowsLoose("savepoint " & sp)
+
+template txCommit*(sp: untyped) =
+  if isTopTx():
+    execNoRowsLoose("commit")
+  else:
+    execNoRowsLoose("release savepoint " & sp)
+
+template txRollback*(sp: untyped) =
+  if isTopTx():
+    execNoRowsLoose("rollback")
+  else:
+    execNoRowsLoose("rollback to savepoint " & sp)
+
 template transaction*(body: untyped) =
   ## Runs the body inside a database transaction. Commits on success,
   ## rolls back on any exception and rethrows. Supports nesting via savepoints.
   block:
-    let orminTop = isTopTx()
     incTxDepth()
     when dbBackend == DbBackend.postgre:
-      let orminSp = "SAVEPOINT ormin_tx_" & $txDepth
+      let sp = "SAVEPOINT ormin_tx_" & $txDepth
     else:
-      let orminSp = "ormin_tx_" & $txDepth
+      let sp = "ormin_tx_" & $txDepth
 
     try:
-      if orminTop:
-        execNoRowsLoose("begin")
-      else:
-        execNoRowsLoose("savepoint " & orminSp)
-
+      txBegin(sp)
       `body`
-
-      if orminTop:
-        execNoRowsLoose("commit")
-      else:
-        execNoRowsLoose("release savepoint " & orminSp)
+      txCommit(sp)
     except DbError as e:
-      if orminTop:
-        execNoRowsLoose("rollback")
-      else:
-        execNoRowsLoose("rollback to savepoint " & orminSp)
+      txRollback(sp)
       raise e
     except Exception as e:
-      if orminTop:
-        execNoRowsLoose("rollback")
-      else:
-        execNoRowsLoose("rollback to savepoint " & orminSp)
+      txRollback(sp)
       raise e
     finally:
       decTxDepth()
 
-template tryTransaction*(body: untyped): untyped =
+template tryTransaction*(body: untyped): bool =
   ## Same as `transaction` but returns bool and swallows DbError.
   block:
-    let orminTop = txDepth == 0
-    inc txDepth
-    let orminSp = "ormin_tx_" & $txDepth
+    incTxDepth()
+    when dbBackend == DbBackend.postgre:
+      let sp = "SAVEPOINT ormin_tx_" & $txDepth
+    else:
+      let sp = "ormin_tx_" & $txDepth
+
     var orminOk = true
     try:
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("begin")
-        else:
-          execNoRowsLoose("savepoint " & orminSp)
-      else:
-        if orminTop:
-          execNoRowsStrict("begin")
-        else:
-          execNoRowsStrict("savepoint " & orminSp)
-
-      block:
-        body
-
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("commit")
-        else:
-          execNoRowsLoose("release savepoint " & orminSp)
-      else:
-        if orminTop:
-          execNoRowsStrict("commit")
-        else:
-          execNoRowsStrict("release savepoint " & orminSp)
+      txBegin(sp)
+      `body`
+      txCommit(sp)
     except DbError:
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("rollback")
-        else:
-          execNoRowsLoose("rollback to savepoint " & orminSp)
-      else:
-        if orminTop:
-          execNoRowsStrict("rollback")
-        else:
-          execNoRowsStrict("rollback to savepoint " & orminSp)
+      txRollback(sp)
       orminOk = false
     except Exception:
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("rollback")
-        else:
-          execNoRowsLoose("rollback to savepoint " & orminSp)
-      else:
-        if orminTop:
-          execNoRowsStrict("rollback")
-        else:
-          execNoRowsStrict("rollback to savepoint " & orminSp)
+      txRollback(sp)
       raise
     finally:
       dec txDepth

@@ -141,7 +141,19 @@ type
     retExpr: NimNode
 
 # Transaction state for nested transactions
-var txDepth* {.threadvar.}: int
+var txDepth {.threadvar.}: int
+
+proc getTxDepth*(): int = 
+  return txDepth
+
+proc isTopTx*(): int = 
+  return txDepth == 0
+
+proc incTxDepth*() = 
+  inc txDepth
+
+proc decTxDepth*() = 
+  inc txDepth
 
 # Execute a non-row SQL statement strictly (errors on failure)
 template execNoRowsStrict*(sqlStmt: string) =
@@ -1114,60 +1126,39 @@ template transaction*(body: untyped) =
   ## Runs the body inside a database transaction. Commits on success,
   ## rolls back on any exception and rethrows. Supports nesting via savepoints.
   block:
-    let orminTop = txDepth == 0
-    inc txDepth
-    let orminSp = "ormin_tx_" & $txDepth
+    let orminTop = isTopTx()
+    incTxDepth()
+    when dbBackend == DbBackend.postgre:
+      let orminSp = "SAVEPOINT ormin_tx_" & $txDepth
+    else:
+      let orminSp = "ormin_tx_" & $txDepth
+
     try:
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("begin")
-        else:
-          execNoRowsLoose("savepoint " & orminSp)
+      if orminTop:
+        execNoRowsLoose("begin")
       else:
-        if orminTop:
-          execNoRowsStrict("begin")
-        else:
-          execNoRowsStrict("savepoint " & orminSp)
+        execNoRowsLoose("savepoint " & orminSp)
 
-      block:
-        body
+      `body`
 
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("commit")
-        else:
-          execNoRowsLoose("release savepoint " & orminSp)
+      if orminTop:
+        execNoRowsLoose("commit")
       else:
-        if orminTop:
-          execNoRowsStrict("commit")
-        else:
-          execNoRowsStrict("release savepoint " & orminSp)
-    except DbError:
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("rollback")
-        else:
-          execNoRowsLoose("rollback to savepoint " & orminSp)
+        execNoRowsLoose("release savepoint " & orminSp)
+    except DbError as e:
+      if orminTop:
+        execNoRowsLoose("rollback")
       else:
-        if orminTop:
-          execNoRowsStrict("rollback")
-        else:
-          execNoRowsStrict("rollback to savepoint " & orminSp)
-      raise
-    except Exception:
-      when dbBackend == DbBackend.postgre:
-        if orminTop:
-          execNoRowsLoose("rollback")
-        else:
-          execNoRowsLoose("rollback to savepoint " & orminSp)
+        execNoRowsLoose("rollback to savepoint " & orminSp)
+      raise e
+    except Exception as e:
+      if orminTop:
+        execNoRowsLoose("rollback")
       else:
-        if orminTop:
-          execNoRowsStrict("rollback")
-        else:
-          execNoRowsStrict("rollback to savepoint " & orminSp)
-      raise
+        execNoRowsLoose("rollback to savepoint " & orminSp)
+      raise e
     finally:
-      dec txDepth
+      decTxDepth()
 
 template tryTransaction*(body: untyped): untyped =
   ## Same as `transaction` but returns bool and swallows DbError.

@@ -140,23 +140,10 @@ type
     # For SQLite: expression to return instead of last_insert_rowid()
     retExpr: NimNode
 
-# Transaction state for nested transactions
-var txDepth {.threadvar.}: int
-
-proc getTxDepth*(): int = 
-  return txDepth
-
-proc isTopTx*(): bool = 
-  return txDepth == 0
-
-proc incTxDepth*() = 
-  inc txDepth
-
-proc decTxDepth*() = 
-  inc txDepth
-
 # Execute a non-row SQL statement strictly (errors on failure)
 template execNoRowsStrict*(sqlStmt: string) =
+  when defined(debugOrminSql):
+    echo "Ormin Executing: ", sqlStmt
   let s {.gensym.} = prepareStmt(db, sqlStmt)
   startQuery(db, s)
   if stepQuery(db, s, false):
@@ -167,6 +154,8 @@ template execNoRowsStrict*(sqlStmt: string) =
 
 # Execute a non-row SQL statement, relying on startQuery to raise on failure
 template execNoRowsLoose*(sqlStmt: string) =
+  when defined(debugOrminSql):
+    echo "Ormin Executing: ", sqlStmt
   let s {.gensym.} = prepareStmt(db, sqlStmt)
   startQuery(db, s)
   discard stepQuery(db, s, false)
@@ -1122,6 +1111,22 @@ macro tryQuery*(body: untyped): untyped =
 # Transactions DSL
 # -------------------------
 
+# Transaction state for nested transactions
+var txDepth {.threadvar.}: int
+
+proc getTxDepth*(): int = 
+  return txDepth
+
+proc isTopTx*(): bool = 
+  result = txDepth == 1
+  echo "IS TOP TX: ", result, " ", txDepth
+
+proc incTxDepth*() = 
+  inc txDepth
+
+proc decTxDepth*() = 
+  dec txDepth
+
 template txBegin*(sp: untyped) =
   if isTopTx():
     execNoRowsLoose("begin transaction")
@@ -1178,7 +1183,7 @@ template tryTransaction*(body: untyped): bool =
       txRollback(sp)
       raise
     finally:
-      dec txDepth
+      decTxDepth()
     orminOk
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =

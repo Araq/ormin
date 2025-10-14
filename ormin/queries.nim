@@ -1110,203 +1110,124 @@ macro tryQuery*(body: untyped): untyped =
 # Transactions DSL
 # -------------------------
 
-macro transaction*(body: untyped): untyped =
+template transaction*(body: untyped) =
   ## Runs the body inside a database transaction. Commits on success,
-  ## rolls back on any exception and rethrows.
-  ## Supports nesting via savepoints.
-  let topSym = genSym(nskVar, "orminTop")
-  let spSym = genSym(nskLet, "orminSp")
-  result = newStmtList()
-  var blockStmts = newStmtList()
-  blockStmts.add newVarStmt(topSym, newTree(nnkInfix, ident"==", ident"txDepth", newLit 0))
-  blockStmts.add newCall(ident"inc", ident"txDepth")
-  blockStmts.add newLetStmt(spSym, newTree(nnkInfix, ident"&", newLit("ormin_tx_"), newCall(ident"$", ident"txDepth")))
+  ## rolls back on any exception and rethrows. Supports nesting via savepoints.
+  block:
+    let orminTop = txDepth == 0
+    inc txDepth
+    let orminSp = "ormin_tx_" & $txDepth
+    try:
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("begin")
+        else:
+          execNoRowsLoose("savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("begin")
+        else:
+          execNoRowsStrict("savepoint " & orminSp)
 
-  # BEGIN or SAVEPOINT
-  var beginStmt = newStmtList()
-  beginStmt.add newTree(nnkWhenStmt,
-    newTree(nnkElifBranch,
-      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("begin")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
-      )
-    ),
-    newTree(nnkElse,
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("begin")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
-      )
-    )
-  )
+      block:
+        body
 
-  # COMMIT or RELEASE SAVEPOINT
-  var commitStmt = newStmtList()
-  commitStmt.add newTree(nnkWhenStmt,
-    newTree(nnkElifBranch,
-      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("commit")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
-      )
-    ),
-    newTree(nnkElse,
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("commit")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
-      )
-    )
-  )
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("commit")
+        else:
+          execNoRowsLoose("release savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("commit")
+        else:
+          execNoRowsStrict("release savepoint " & orminSp)
+    except DbError:
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("rollback")
+        else:
+          execNoRowsLoose("rollback to savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("rollback")
+        else:
+          execNoRowsStrict("rollback to savepoint " & orminSp)
+      raise
+    except Exception:
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("rollback")
+        else:
+          execNoRowsLoose("rollback to savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("rollback")
+        else:
+          execNoRowsStrict("rollback to savepoint " & orminSp)
+      raise
+    finally:
+      dec txDepth
 
-  # Rollback blocks (DbError and any Exception) and rethrow
-  let exceptDb = newTree(nnkExceptBranch, newTree(nnkRefTy, ident"DbError"),
-    newStmtList(
-      newTree(nnkWhenStmt,
-        newTree(nnkElifBranch,
-          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        ),
-        newTree(nnkElse,
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        )
-      ),
-      newTree(nnkRaiseStmt, newEmptyNode())
-    )
-  )
-  let exceptAny = newTree(nnkExceptBranch, ident"Exception",
-    newStmtList(
-      newTree(nnkWhenStmt,
-        newTree(nnkElifBranch,
-          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        ),
-        newTree(nnkElse,
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        )
-      ),
-      newTree(nnkRaiseStmt, newEmptyNode())
-    )
-  )
-  let finallyStmtTx = newTree(nnkFinally, newStmtList(newCall(ident"dec", ident"txDepth")))
-
-  # Execute BEGIN; body; COMMIT inside try
-  let bodyBlk = newTree(nnkBlockStmt, newEmptyNode(), body)
-  let tryBody = newStmtList(beginStmt, bodyBlk, commitStmt)
-  let tryStmt = newTree(nnkTryStmt, tryBody, exceptDb, exceptAny, finallyStmtTx)
-  blockStmts.add tryStmt
-  # This macro is statement-level; no resulting expression
-  result = newTree(nnkStmtList, newTree(nnkBlockStmt, newEmptyNode(), blockStmts))
-
-macro tryTransaction*(body: untyped): untyped =
+template tryTransaction*(body: untyped): untyped =
   ## Same as `transaction` but returns bool and swallows DbError.
-  let topSym = genSym(nskVar, "orminTop")
-  let spSym = genSym(nskLet, "orminSp")
-  let okSym = genSym(nskVar, "orminOk")
-  result = newStmtList()
-  var blockStmts = newStmtList()
-  blockStmts.add newVarStmt(topSym, newTree(nnkInfix, ident"==", ident"txDepth", newLit 0))
-  blockStmts.add newCall(ident"inc", ident"txDepth")
-  blockStmts.add newLetStmt(spSym, newTree(nnkInfix, ident"&", newLit("ormin_tx_"), newCall(ident"$", ident"txDepth")))
-  blockStmts.add newTree(nnkVarSection, newIdentDefs(okSym, ident"bool", newLit(true)))
+  block:
+    let orminTop = txDepth == 0
+    inc txDepth
+    let orminSp = "ormin_tx_" & $txDepth
+    var orminOk = true
+    try:
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("begin")
+        else:
+          execNoRowsLoose("savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("begin")
+        else:
+          execNoRowsStrict("savepoint " & orminSp)
 
-  # BEGIN or SAVEPOINT
-  var beginStmt = newStmtList()
-  beginStmt.add newTree(nnkWhenStmt,
-    newTree(nnkElifBranch,
-      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("begin")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
-      )
-    ),
-    newTree(nnkElse,
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("begin")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("savepoint "), spSym))))
-      )
-    )
-  )
+      block:
+        body
 
-  # Body execution as statements; ignore any result
-  let bodyBlk = newTree(nnkBlockStmt, newEmptyNode(), body)
-
-  # COMMIT or RELEASE SAVEPOINT
-  var commitStmt = newStmtList()
-  commitStmt.add newTree(nnkWhenStmt,
-    newTree(nnkElifBranch,
-      newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("commit")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
-      )
-    ),
-    newTree(nnkElse,
-      newTree(nnkIfStmt,
-        newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("commit")))),
-        newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("release savepoint "), spSym))))
-      )
-    )
-  )
-
-  let tryBody = newStmtList(beginStmt, bodyBlk, commitStmt)
-
-  let exceptDb = newTree(nnkExceptBranch, ident"DbError",
-    newStmtList(
-      newTree(nnkWhenStmt,
-        newTree(nnkElifBranch,
-          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        ),
-        newTree(nnkElse,
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        )
-      ),
-      newAssignment(okSym, newLit(false))
-    )
-  )
-  let exceptAny = newTree(nnkExceptBranch, ident"Exception",
-    newStmtList(
-      newTree(nnkWhenStmt,
-        newTree(nnkElifBranch,
-          newTree(nnkInfix, ident"==", ident"dbBackend", newTree(nnkDotExpr, ident"DbBackend", ident"postgre")),
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsLoose", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsLoose", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        ),
-        newTree(nnkElse,
-          newTree(nnkIfStmt,
-            newTree(nnkElifBranch, topSym, newStmtList(newCall(ident"execNoRowsStrict", newLit("rollback")))),
-            newTree(nnkElse, newStmtList(newCall(ident"execNoRowsStrict", newTree(nnkInfix, ident"&", newLit("rollback to savepoint "), spSym))))
-          )
-        )
-      ),
-      newTree(nnkRaiseStmt, newEmptyNode())
-    )
-  )
-  let finallyStmt = newTree(nnkFinally, newStmtList(newCall(ident"dec", ident"txDepth")))
-  let tryStmt = newTree(nnkTryStmt, tryBody, exceptDb, exceptAny, finallyStmt)
-  blockStmts.add tryStmt
-  blockStmts.add okSym
-  result = newTree(nnkStmtListExpr, newTree(nnkBlockStmt, newEmptyNode(), blockStmts))
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("commit")
+        else:
+          execNoRowsLoose("release savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("commit")
+        else:
+          execNoRowsStrict("release savepoint " & orminSp)
+    except DbError:
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("rollback")
+        else:
+          execNoRowsLoose("rollback to savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("rollback")
+        else:
+          execNoRowsStrict("rollback to savepoint " & orminSp)
+      orminOk = false
+    except Exception:
+      when dbBackend == DbBackend.postgre:
+        if orminTop:
+          execNoRowsLoose("rollback")
+        else:
+          execNoRowsLoose("rollback to savepoint " & orminSp)
+      else:
+        if orminTop:
+          execNoRowsStrict("rollback")
+        else:
+          execNoRowsStrict("rollback to savepoint " & orminSp)
+      raise
+    finally:
+      dec txDepth
+    orminOk
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList

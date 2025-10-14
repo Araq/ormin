@@ -54,26 +54,58 @@ suite &"Transactions ({backend})":
     check db.getValue(sql"select count(*) from person where id = 202") == "0"
     check db.getValue(sql"select count(*) from person where id = 201 and name = 'dup'") == "0"
 
-  test "tryTransaction returns false on DbError":
-    let ok = tryTransaction:
+  test "rollback on error":
+    # prepare one row
+    var failed = false
+    query:
+      insert person(id = ?(501), name = ?"john501", password = ?"p501", email = ?"john501@mail.com", salt = ?"s501", status = ?"ok")
+    # in transaction insert a new row and then violate PK
+    transaction:
+      query:
+        insert person(id = ?(502), name = ?"john502", password = ?"p502", email = ?"john502@mail.com", salt = ?"s502", status = ?"ok")
+      # duplicate key error
+      query:
+        insert person(id = ?(501), name = ?"dup", password = ?"p", email = ?"e", salt = ?"s", status = ?"x")
+      check false # should not reach
+    else:
+      failed = true
+
+    check failed
+    # both inserts inside the transaction should be rolled back
+    check db.getValue(sql"select count(*) from person where id = 502") == "0"
+    check db.getValue(sql"select count(*) from person where id = 501 and name = 'dup'") == "0"
+
+  test "transaction set false on DbError":
+    var failed = false
+    transaction:
       query:
         insert person(id = ?(301), name = ?"john301", password = ?"p301", email = ?"john301@mail.com", salt = ?"s301", status = ?"ok")
       query:
         insert person(id = ?(301), name = ?"dup", password = ?"p", email = ?"e", salt = ?"s", status = ?"x")
-    check ok == false
+    else:
+      failed = true
+    check failed
     check db.getValue(sql"select count(*) from person where id = 301") == "0"
 
   test "nested savepoints":
+    var failed = false
     transaction:
       query:
         insert person(id = ?(401), name = ?"john401", password = ?"p401", email = ?"john401@mail.com", salt = ?"s401", status = ?"ok")
-      let innerOk = tryTransaction:
+      var innerOk = true
+      transaction:
         query:
           insert person(id = ?(402), name = ?"john402", password = ?"p402", email = ?"john402@mail.com", salt = ?"s402", status = ?"ok")
         query:
           insert person(id = ?(401), name = ?"dup401", password = ?"p", email = ?"e", salt = ?"s", status = ?"x")
+      else:
+        innerOk = false
+
       check innerOk == false
+
       # after inner rollback, we can still insert another row and commit outer
       query:
         insert person(id = ?(403), name = ?"john403", password = ?"p403", email = ?"john403@mail.com", salt = ?"s403", status = ?"ok")
+    else:
+      failed = true
     check db.getValue(sql"select count(*) from person where id in (401,402,403)") == "2"

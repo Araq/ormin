@@ -1164,26 +1164,28 @@ template transaction*(body: untyped) =
     finally:
       decTxDepth()
 
-template tryTransaction*(body: untyped): bool =
-  ## Same as `transaction` but returns bool and swallows DbError.
+macro getBlock(blk: untyped): untyped =
+  result = blk[0]
+
+template transaction*(body, other: untyped) =
+  ## Runs the body inside a database transaction. Commits on success,
+  ## rolls back on any exception and rethrows. Supports nesting via savepoints.
   block:
     incTxDepth()
     let sp = "ormin_tx_" & $txDepth
 
-    var orminOk = true
     try:
       txBegin(sp)
       `body`
       txCommit(sp)
     except DbError:
       txRollback(sp)
-      orminOk = false
+      getBlock(`other`)
     except CatchableError, Defect:
       txRollback(sp)
       raise
     finally:
       decTxDepth()
-    orminOk
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList

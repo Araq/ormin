@@ -1116,9 +1116,7 @@ macro transaction*(body: untyped): untyped =
   ## Supports nesting via savepoints.
   let topSym = genSym(nskVar, "orminTop")
   let spSym = genSym(nskLet, "orminSp")
-  let rvSym = genSym(nskLet, "orminRv")
   result = newStmtList()
-  # block to ensure proper expression value propagation
   var blockStmts = newStmtList()
   blockStmts.add newVarStmt(topSym, newTree(nnkInfix, ident"==", ident"txDepth", newLit 0))
   blockStmts.add newCall(ident"inc", ident"txDepth")
@@ -1142,9 +1140,6 @@ macro transaction*(body: untyped): untyped =
     )
   )
 
-  # body result
-  blockStmts.add newLetStmt(rvSym, newTree(nnkBlockStmt, newEmptyNode(), body))
-
   # COMMIT or RELEASE SAVEPOINT
   var commitStmt = newStmtList()
   commitStmt.add newTree(nnkWhenStmt,
@@ -1163,11 +1158,7 @@ macro transaction*(body: untyped): untyped =
     )
   )
 
-  # try/except wrapping
-  let tryBody = newStmtList(beginStmt, newEmptyNode())
-  # after begin, execute; above rv already holds value
-  tryBody.add commitStmt
-
+  # Rollback blocks (DbError and any Exception) and rethrow
   let exceptDb = newTree(nnkExceptBranch, newTree(nnkRefTy, ident"DbError"),
     newStmtList(
       newTree(nnkWhenStmt,
@@ -1209,10 +1200,14 @@ macro transaction*(body: untyped): untyped =
     )
   )
   let finallyStmtTx = newTree(nnkFinally, newStmtList(newCall(ident"dec", ident"txDepth")))
+
+  # Execute BEGIN; body; COMMIT inside try
+  let bodyBlk = newTree(nnkBlockStmt, newEmptyNode(), body)
+  let tryBody = newStmtList(beginStmt, bodyBlk, commitStmt)
   let tryStmt = newTree(nnkTryStmt, tryBody, exceptDb, exceptAny, finallyStmtTx)
   blockStmts.add tryStmt
-  blockStmts.add rvSym
-  result = newTree(nnkStmtListExpr, newTree(nnkBlockStmt, newEmptyNode(), blockStmts))
+  # This macro is statement-level; no resulting expression
+  result = newTree(nnkStmtList, newTree(nnkBlockStmt, newEmptyNode(), blockStmts))
 
 macro tryTransaction*(body: untyped): untyped =
   ## Same as `transaction` but returns bool and swallows DbError.

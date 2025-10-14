@@ -21,7 +21,7 @@ else:
   var memoryPath = testDir & "/" & ":memory:"
   let db {.global.} = open(memoryPath, "", "", "")
 
-let sqlFilePath = testDir & "/" & sqlFileName
+var sqlFilePath = Path(testDir & "/" & sqlFileName)
 
 suite &"Transactions ({backend})":
   # Fresh schema
@@ -40,7 +40,7 @@ suite &"Transactions ({backend})":
       insert person(id = ?(201), name = ?"john201", password = ?"p201", email = ?"john201@mail.com", salt = ?"s201", status = ?"ok")
     # in transaction insert a new row and then violate PK
     try:
-      discard transaction:
+      transaction:
         query:
           insert person(id = ?(202), name = ?"john202", password = ?"p202", email = ?"john202@mail.com", salt = ?"s202", status = ?"ok")
         # duplicate key error

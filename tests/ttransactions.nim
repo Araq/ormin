@@ -54,7 +54,7 @@ suite &"Transactions ({backend})":
     check db.getValue(sql"select count(*) from person where id = 202") == "0"
     check db.getValue(sql"select count(*) from person where id = 201 and name = 'dup'") == "0"
 
-  test "rollback on error":
+  test "rollback on error with else":
     # prepare one row
     var failed = false
     query:
@@ -74,6 +74,26 @@ suite &"Transactions ({backend})":
     # both inserts inside the transaction should be rolled back
     check db.getValue(sql"select count(*) from person where id = 502") == "0"
     check db.getValue(sql"select count(*) from person where id = 501 and name = 'dup'") == "0"
+
+  test "commit normally with else":
+    # prepare one row
+    var failed = false
+    query:
+      insert person(id = ?(601), name = ?"john601", password = ?"p601", email = ?"john601@mail.com", salt = ?"s601", status = ?"ok")
+    # in transaction insert a new row and then violate PK
+    transaction:
+      query:
+        insert person(id = ?(602), name = ?"john602", password = ?"p602", email = ?"john602@mail.com", salt = ?"s602", status = ?"ok")
+      query:
+        insert person(id = ?(603), name = ?"dup", password = ?"p", email = ?"e", salt = ?"s", status = ?"x")
+    else:
+      failed = true
+
+    check not failed
+    # both inserts inside the transaction should be rolled back
+    check db.getValue(sql"select count(*) from person where id = 603") == "1"
+    check db.getValue(sql"select count(*) from person where id = 602") == "1"
+    check db.getValue(sql"select count(*) from person where id = 601") == "1"
 
   test "transaction set false on DbError":
     var failed = false

@@ -1115,11 +1115,10 @@ macro tryQuery*(body: untyped): untyped =
 var txDepth {.threadvar.}: int
 
 proc getTxDepth*(): int = 
-  return txDepth
+  result = txDepth
 
 proc isTopTx*(): bool = 
   result = txDepth == 1
-  echo "IS TOP TX: ", result, " ", txDepth
 
 proc incTxDepth*() = 
   inc txDepth

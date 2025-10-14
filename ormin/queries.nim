@@ -146,7 +146,7 @@ var txDepth {.threadvar.}: int
 proc getTxDepth*(): int = 
   return txDepth
 
-proc isTopTx*(): int = 
+proc isTopTx*(): bool = 
   return txDepth == 0
 
 proc incTxDepth*() = 

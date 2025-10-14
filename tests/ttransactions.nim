@@ -68,6 +68,7 @@ suite &"Transactions ({backend})":
         insert person(id = ?(501), name = ?"dup", password = ?"p", email = ?"e", salt = ?"s", status = ?"x")
       check false # should not reach
     else:
+      echo "do something else..."
       failed = true
 
     check failed

@@ -23,10 +23,11 @@ else:
 
 var sqlFilePath = Path(testDir & "/" & sqlFileName)
 
+# Fresh schema
+db.dropTable(sqlFilePath)
+db.createTable(sqlFilePath)
+
 suite &"Transactions ({backend})":
-  # Fresh schema
-  db.dropTable(sqlFilePath)
-  db.createTable(sqlFilePath)
 
   test "commit on success":
     transaction:

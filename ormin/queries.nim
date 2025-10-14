@@ -142,8 +142,8 @@ type
 
 # Execute a non-row SQL statement strictly (errors on failure)
 template execNoRowsStrict*(sqlStmt: string) =
-  when defined(debugOrminSql):
-    echo "Ormin Executing: ", sqlStmt
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", q
   let s {.gensym.} = prepareStmt(db, sqlStmt)
   startQuery(db, s)
   if stepQuery(db, s, false):
@@ -154,8 +154,8 @@ template execNoRowsStrict*(sqlStmt: string) =
 
 # Execute a non-row SQL statement, relying on startQuery to raise on failure
 template execNoRowsLoose*(sqlStmt: string) =
-  when defined(debugOrminSql):
-    echo "Ormin Executing: ", sqlStmt
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", sqlStmt
   let s {.gensym.} = prepareStmt(db, sqlStmt)
   startQuery(db, s)
   discard stepQuery(db, s, false)

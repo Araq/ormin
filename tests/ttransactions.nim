@@ -48,7 +48,6 @@ suite &"Transactions ({backend})":
           insert person(id = ?(201), name = ?"dup", password = ?"p", email = ?"e", salt = ?"s", status = ?"x")
       check false # should not reach
     except DbError as e:
-      echo "GOT: ", $e.name, ": ", $e.msg
       discard
     # both inserts inside the transaction should be rolled back
     check db.getValue(sql"select count(*) from person where id = 202") == "0"

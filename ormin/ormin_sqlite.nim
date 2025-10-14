@@ -28,6 +28,8 @@ proc dbError*(db: DbConn) {.noreturn.} =
   raise e
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", q
   if prepare_v2(db, q, q.len.cint, result, nil) != SQLITE_OK:
     dbError(db)
 

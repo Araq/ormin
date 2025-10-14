@@ -1158,9 +1158,9 @@ template transaction*(body: untyped) =
     except DbError as e:
       txRollback(sp)
       raise e
-    except Exception as e:
+    except CatchableError, Defect:
       txRollback(sp)
-      raise e
+      raise
     finally:
       decTxDepth()
 
@@ -1178,7 +1178,7 @@ template tryTransaction*(body: untyped): bool =
     except DbError:
       txRollback(sp)
       orminOk = false
-    except Exception:
+    except CatchableError, Defect:
       txRollback(sp)
       raise
     finally:

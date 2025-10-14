@@ -1155,9 +1155,9 @@ template transaction*(body: untyped) =
       txBegin(sp)
       `body`
       txCommit(sp)
-    except DbError as e:
+    except DbError:
       txRollback(sp)
-      raise e
+      raise
     except CatchableError, Defect:
       txRollback(sp)
       raise

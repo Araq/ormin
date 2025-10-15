@@ -31,9 +31,9 @@ task test_postgres, "Run PostgreSQL test suite":
   exec "./tools/ormin_importer tests/forum_model_postgres.sql"
   exec "./tools/ormin_importer tests/model_postgre.sql"
 
-  exec "nim c -f -d:nimDebugDlOpen -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
-  exec "nim c -f -d:nimDebugDlOpen -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
-  exec "nim c -f -d:nimDebugDlOpen -f -d:nimDebugDlOpen -r -d:postgre tests/tpostgre"
+  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
+  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
+  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tpostgre"
 
 task buildexamples, "Build examples: chat and forum":
   buildimporterTask()

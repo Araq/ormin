@@ -153,7 +153,7 @@ template execNoRowsStrict*(sqlStmt: string) =
     dbError(db)
 
 # Execute a non-row SQL statement, relying on startQuery to raise on failure
-template execNoRowsLoose*(sqlStmt: string) =
+template execNoRowsLoose(sqlStmt: string) =
   when defined(debugOrminTrace):
     echo "[[Ormin Executing]]: ", sqlStmt
   let s {.gensym.} = prepareStmt(db, sqlStmt)

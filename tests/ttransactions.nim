@@ -35,7 +35,7 @@ suite &"Transactions ({backend})":
         insert person(id = ?(101), name = ?"john101", password = ?"p101", email = ?"john101@mail.com", salt = ?"s101", status = ?"ok")
     check db.getValue(sql"select count(*) from person where id = 101") == "1"
 
-  test "rollback on error":
+  test "rollback on error with manual try except":
     # prepare one row
     query:
       insert person(id = ?(201), name = ?"john201", password = ?"p201", email = ?"john201@mail.com", salt = ?"s201", status = ?"ok")

@@ -33,6 +33,8 @@ proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
 var sid {.compileTime.}: int
 
 proc prepareStmt*(db: DbConn; q: string): PStmt =
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", q
   inc sid
   result = "ormin" & $sid
   var res = pqprepare(db, result, q, 0, nil)

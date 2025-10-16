@@ -140,6 +140,27 @@ type
     # For SQLite: expression to return instead of last_insert_rowid()
     retExpr: NimNode
 
+# Execute a non-row SQL statement strictly (errors on failure)
+template execNoRowsStrict*(sqlStmt: string) =
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", q
+  let s {.gensym.} = prepareStmt(db, sqlStmt)
+  startQuery(db, s)
+  if stepQuery(db, s, false):
+    stopQuery(db, s)
+  else:
+    stopQuery(db, s)
+    dbError(db)
+
+# Execute a non-row SQL statement, relying on startQuery to raise on failure
+template execNoRowsLoose(sqlStmt: string) =
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", sqlStmt
+  let s {.gensym.} = prepareStmt(db, sqlStmt)
+  startQuery(db, s)
+  discard stepQuery(db, s, false)
+  stopQuery(db, s)
+
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "", limit: "", offset: "",
@@ -549,7 +570,12 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     if k != nnkIteratorDef:
       rtyp = nnkBracketExpr.newTree(ident"seq", rtyp)
     finalParams.add rtyp
-  finalParams.add newIdentDefs(ident"db", ident("DbConn"))
+  when dbBackend == DbBackend.postgre:
+    finalParams.add newIdentDefs(ident"db", newTree(nnkDotExpr, ident"ormin_postgre", ident"DbConn"))
+  elif dbBackend == DbBackend.sqlite:
+    finalParams.add newIdentDefs(ident"db", newTree(nnkDotExpr, ident"ormin_sqlite", ident"DbConn"))
+  else:
+    finalParams.add newIdentDefs(ident"db", ident("DbConn"))
   var i = 1
   if q.params.len > 0:
     body.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
@@ -1080,6 +1106,86 @@ macro tryQuery*(body: untyped): untyped =
   result = queryImpl(q, body, true, false)
   when defined(debugOrminDsl):
     macros.hint("Ormin Query: " & repr(result), body)
+
+# -------------------------
+# Transactions DSL
+# -------------------------
+
+# Transaction state for nested transactions
+var txDepth {.threadvar.}: int
+
+proc getTxDepth*(): int = 
+  result = txDepth
+
+proc isTopTx*(): bool = 
+  result = txDepth == 1
+
+proc incTxDepth*() = 
+  inc txDepth
+
+proc decTxDepth*() = 
+  dec txDepth
+
+template txBegin*(sp: untyped) =
+  if isTopTx():
+    execNoRowsLoose("begin transaction")
+  else:
+    execNoRowsLoose("savepoint " & sp)
+
+template txCommit*(sp: untyped) =
+  if isTopTx():
+    execNoRowsLoose("commit")
+  else:
+    execNoRowsLoose("release savepoint " & sp)
+
+template txRollback*(sp: untyped) =
+  if isTopTx():
+    execNoRowsLoose("rollback")
+  else:
+    execNoRowsLoose("rollback to savepoint " & sp)
+
+template transaction*(body: untyped) =
+  ## Runs the body inside a database transaction. Commits on success,
+  ## rolls back on any exception and rethrows. Supports nesting via savepoints.
+  block:
+    incTxDepth()
+    let sp = "ormin_tx_" & $txDepth
+
+    try:
+      txBegin(sp)
+      `body`
+      txCommit(sp)
+    except DbError:
+      txRollback(sp)
+      raise
+    except CatchableError, Defect:
+      txRollback(sp)
+      raise
+    finally:
+      decTxDepth()
+
+macro getBlock(blk: untyped): untyped =
+  result = blk[0]
+
+template transaction*(body, other: untyped) =
+  ## Runs the body inside a database transaction. Commits on success,
+  ## rolls back on any exception and rethrows. Supports nesting via savepoints.
+  block:
+    incTxDepth()
+    let sp = "ormin_tx_" & $txDepth
+
+    try:
+      txBegin(sp)
+      `body`
+      txCommit(sp)
+    except DbError:
+      txRollback(sp)
+      getBlock(`other`)
+    except CatchableError, Defect:
+      txRollback(sp)
+      raise
+    finally:
+      decTxDepth()
 
 proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectKind query, nnkStmtList

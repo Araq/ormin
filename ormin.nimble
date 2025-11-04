@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.5.0"
+version       = "0.5.1"
 author        = "Araq"
 description = "Prepared SQL statement generator. A lightweight ORM."
 license       = "MIT"
@@ -17,4 +17,6 @@ feature "examples":
   requires "karax"
   requires "jester"
 
-include "config.nims"
+import std/os
+when fileExists("config.nims"):
+  include "config.nims"

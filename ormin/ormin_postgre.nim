@@ -121,6 +121,7 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
   dest = isTrue(pqgetvalue(queryResult, queryI, idx.cint))
 
 proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
+  dest = ""
   var i = 0
   while src[i] != '\0':
     dest.add src[i]

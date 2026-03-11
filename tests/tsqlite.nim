@@ -139,3 +139,15 @@ suite "blob":
       where typblob == ?target
     check res.len == 1
     check res[0].typblob == target
+
+  createProc selectAllBlob:
+    select tb_blob(id, typblob)
+
+  test "createProc":
+    let res = db.selectAllBlob
+    check res.mapIt(it.typblob) == blobFixtures
+
+  test "createProc with empty blob in result":
+    db.exec(sql"insert into tb_blob(id, typblob) values (?, ?)", 9, "")
+    let res = db.selectAllBlob
+    check res[^1].typblob == blobFromBytes(@[])

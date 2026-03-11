@@ -619,8 +619,6 @@ suite "query":
       where id >= 5
 
     let rows = db.getAllThreads
-    for r in rows:
-      echo r
     check rows[1].id == 6 
     check rows[1].views == 77
     check rows[1].name == ""

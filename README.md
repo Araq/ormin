@@ -25,7 +25,7 @@ TODO:
 
 ## Schema and Database Setup
 
-1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you
+1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. By default this runs `ormin_importer` and includes the generated Nim code. Pass `includeStatic = true` to generate the model directly at compile time from the SQL file instead.
 2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
 
 ### Static Schema
@@ -41,6 +41,16 @@ db.createTable(schema)
 db.createTable(schema, "quoted table")
 db.dropTable(schema)
 db.dropTable(schema, "quoted table")
+```
+
+If you already use `importModel`, you can opt into the same static path directly there. `includeStatic = true` skips the generated `.nim` file, builds the model metadata from the `.sql` file at compile time, and exposes `sqlSchema` automatically:
+
+```nim
+import ../ormin
+importModel(DbBackend.sqlite, "model_sqlite", includeStatic = true)
+
+db.createTable(sqlSchema)
+db.dropTable(sqlSchema, "tb_timestamp")
 ```
 
 ### SQLite
@@ -312,7 +322,7 @@ discard db.getValue(sql"select setval('antibot_id_seq', 10, false)")
 
 ## Tooling
 
-The repository ships with `tools/ormin_importer`, invoked automatically by `importModel`, to parse SQL schema files into Nim type information.
+The repository ships with `tools/ormin_importer`, used by the default `importModel` path, to parse SQL schema files into Nim type information and write the generated `.nim` model file.
 
 ## Examples
 

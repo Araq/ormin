@@ -18,6 +18,7 @@ task test, "Run all test suite":
   exec "nim c -f -r tests/tcommon"
   exec "nim c -f -r tests/tsqlite"
   exec "nim c -f -r tests/tdb_utils"
+  exec "nim c -f -r tests/timportstatic"
 
 task setup_postgres, "Ensure local Postgres has test DB/user":
   # Use a simple script to avoid Nim/psql quoting pitfalls

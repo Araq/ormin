@@ -17,4 +17,8 @@ feature "examples":
   requires "karax"
   requires "jester"
 
-include "config.nims"
+import std/os
+when fileExists("config.nims"):
+import std/os
+when fileExists("config.nims"):
+  include "config.nims"

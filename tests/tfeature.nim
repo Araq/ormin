@@ -611,3 +611,15 @@ suite "query":
       where id == ?id
     check res[0] != res2[0]
     check res[0].toUpper() == res2[0]
+  test "empty_string":
+    db.exec(insertthread, 6, "", 77)
+
+    createProc getAllThreads:
+      select thread(id, name, views)
+      where id >= 5
+
+    let rows = db.getAllThreads
+    check rows[1].id == 6 
+    check rows[1].views == 77
+    check rows[1].name == ""
+

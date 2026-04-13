@@ -284,6 +284,18 @@ for row in db.postsIter(userId):
 
 Both forms accept parameters matching the `?`/`%` placeholders and produce the same return types as an inline `query` block.
 
+Inline `query` blocks resolve `db` from the current lexical scope, so a proc parameter or local `db` binding can override the global connection when needed. This is useful for making procs which need to do complex handling:
+
+```nim
+proc loadUser(db: DbConn; userId: int): User =
+  let row = query:
+    select user(id, name, email)
+    where id == ?userId
+    limit 1
+
+  User(id: row.id, name: row.name, email: row.email)
+```
+
 ## Running Arbitrary SQL
 
 The standard `db_connector` APIs can be imported and used. For example:

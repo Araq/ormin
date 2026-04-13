@@ -47,18 +47,27 @@ proc parseQualifiedIdentifier(name: string): seq[(string, bool)] =
 
   result.add((current, partWasQuoted))
 
+proc canUseBareIdentifier(part: string): bool =
+  if part.len == 0:
+    return false
+  if part[0] notin {'a'..'z', 'A'..'Z', '_'}:
+    return false
+  for c in part[1..^1]:
+    if c notin {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+      return false
+  true
+
 proc quoteDbIdentifier*(name: string): DbId =
   ## Quote a database identifier for direct interpolation into SQL text.
   ## Dot-separated names are treated as qualified identifiers.
-  var quotedParts: seq[string] = @[]
+  var partsSql: seq[string] = @[]
   for (part, wasQuoted) in parseQualifiedIdentifier(name):
-    let normalizedPart =
-      if wasQuoted:
-        part
-      else:
-        part.toLowerAscii()
-    quotedParts.add("\"" & normalizedPart.replace("\"", "\"\"") & "\"")
-  DbId(quotedParts.join("."))
+    let normalizedPart = if wasQuoted: part else: part.toLowerAscii()
+    if wasQuoted or not canUseBareIdentifier(normalizedPart):
+      partsSql.add("\"" & normalizedPart.replace("\"", "\"\"") & "\"")
+    else:
+      partsSql.add(normalizedPart)
+  DbId(partsSql.join("."))
 
 proc dropTableName(db: DbConn; tableName: string) =
   # SQL parameters bind values, not identifiers, so DROP TABLE needs the

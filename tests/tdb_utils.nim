@@ -43,15 +43,15 @@ writeFile($sqlFile, sqlContent)
 
 suite "db_utils: case and quoted names":
   test "quoteDbIdentifier quotes and escapes identifiers":
-    check $quoteDbIdentifier("lower_table") == "\"lower_table\""
-    check $quoteDbIdentifier("UPPER_TABLE") == "\"upper_table\""
+    check $quoteDbIdentifier("lower_table") == "lower_table"
+    check $quoteDbIdentifier("UPPER_TABLE") == "upper_table"
     check $quoteDbIdentifier("\"Quoted Table\"") == "\"Quoted Table\""
     check $quoteDbIdentifier("`Quoted Table2`") == "\"Quoted Table2\""
     check $quoteDbIdentifier("'Quoted Table3'") == "\"Quoted Table3\""
     check $quoteDbIdentifier("\"UPPER_TABLE\"") == "\"UPPER_TABLE\""
     check $quoteDbIdentifier("\"A\"\"B\"") == "\"A\"\"B\""
-    check $quoteDbIdentifier("schema.table") == "\"schema\".\"table\""
-    check $quoteDbIdentifier("Schema.\"Mixed Table\"") == "\"schema\".\"Mixed Table\""
+    check $quoteDbIdentifier("schema.table") == "schema.table"
+    check $quoteDbIdentifier("Schema.\"Mixed Table\"") == "schema.\"Mixed Table\""
     check $quoteDbIdentifier("weird\"name") == "\"weird\"\"name\""
 
   test "check tables names":

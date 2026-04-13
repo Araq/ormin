@@ -37,11 +37,15 @@ let sqlContent = """
   );
 """
 
-const staticSqlContent = staticRead("db_utils_case_quoted.sql")
+const staticSqlContent = staticLoad("db_utils_case_quoted.sql")
 
 writeFile($sqlFile, sqlContent)
 
 suite "db_utils: case and quoted names":
+  test "staticLoad returns typed compile-time SQL":
+    let loaded: DbSql = staticSqlContent
+    check $loaded == sqlContent
+
   test "quoteDbIdentifier quotes and escapes identifiers":
     check $quoteDbIdentifier("lower_table") == "lower_table"
     check $quoteDbIdentifier("UPPER_TABLE") == "upper_table"
@@ -92,15 +96,15 @@ suite "db_utils: case and quoted names":
     let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table'")
     check countQuoted == "1"
 
-  test "createTableStatic creates all tables from compile-time SQL":
+  test "createTable creates all tables from compile-time SQL":
     let db2 = open(":memory:", "", "", "")
-    db2.createTableStatic(staticSqlContent)
+    db2.createTable(staticSqlContent)
     let countAll = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name in ('lower_table','UPPER_TABLE','Quoted Table','Quoted Table2','UPPER_QUOTED','A\"B')"))
     check countAll == "6"
 
-  test "createTableStatic with specific lowercased name matches quoted":
+  test "createTable with specific lowercased name matches quoted from compile-time SQL":
     let db2 = open(":memory:", "", "", "")
-    db2.createTableStatic(staticSqlContent, "quoted table")
+    db2.createTable(staticSqlContent, "quoted table")
     let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table'")
     check countQuoted == "1"
 
@@ -128,31 +132,31 @@ suite "db_utils: case and quoted names":
     else:
       check countEscapedQuoted == "0"
 
-  test "dropTableStatic removes tables from compile-time SQL":
+  test "dropTable removes tables from compile-time SQL":
     let db2 = open(":memory:", "", "", "")
-    db2.createTableStatic(staticSqlContent)
-    db2.dropTableStatic(staticSqlContent, "quoted table2")
+    db2.createTable(staticSqlContent)
+    db2.dropTable(staticSqlContent, "quoted table2")
     let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table2'")
     when defined(orminLegacySqliteDropNames):
       check countQuoted == "1"
     else:
       check countQuoted == "0"
 
-    db2.dropTableStatic(staticSqlContent, "upper_quoted")
+    db2.dropTable(staticSqlContent, "upper_quoted")
     let countUpperQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'UPPER_QUOTED'")
     when defined(orminLegacySqliteDropNames):
       check countUpperQuoted == "1"
     else:
       check countUpperQuoted == "0"
 
-    db2.dropTableStatic(staticSqlContent, "a\"b")
+    db2.dropTable(staticSqlContent, "a\"b")
     let countEscapedQuoted = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name = 'A\"B'"))
     when defined(orminLegacySqliteDropNames):
       check countEscapedQuoted == "1"
     else:
       check countEscapedQuoted == "0"
 
-    db2.dropTableStatic(staticSqlContent)
+    db2.dropTable(staticSqlContent)
     let countAll = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name in ('lower_table','UPPER_TABLE','Quoted Table','Quoted Table2','UPPER_QUOTED','A\"B')"))
     when defined(orminLegacySqliteDropNames):
       check countAll == "3"

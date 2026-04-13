@@ -1,4 +1,4 @@
-import std/paths
+import std/[os, paths]
 import db_connector/db_common, strutils, strformat
 import db_connector/db_postgres as db_postgres
 import db_connector/db_sqlite as db_sqlite
@@ -13,6 +13,23 @@ type
   DbSql* = distinct string
 
 proc `$`*(dbId: DbId): string {.borrow.}
+proc `$`*(dbSql: DbSql): string {.borrow.}
+
+template staticLoad*(filename: string): DbSql =
+  bind isAbsolute, parentDir, `/`, instantiationInfo
+  block:
+    const schemaPath {.gensym.} = static:
+      if isAbsolute(filename):
+        filename
+      else:
+        parentDir(instantiationInfo(-1, true)[0]) / filename
+    const schemaSql {.gensym.} = staticRead(schemaPath)
+    static:
+      try:
+        discard parseSql(schemaSql)
+      except SqlParseError as e:
+        doAssert false, "Invalid SQL in " & schemaPath & ": " & e.msg
+    DbSql(schemaSql)
 
 proc parseQualifiedIdentifier(name: string): seq[(string, bool)] =
   var current = ""
@@ -82,11 +99,11 @@ proc dropTableName(db: DbConn; tableName, lookupName: string) =
     else:
       db.exec(sql("drop table if exists " & $tableIdentSql))
 
-iterator tableDefs(sql: string): tuple[name, tableName, model: string] =
+iterator tableDefs(sql: DbSql): tuple[name, tableName, model: string] =
   # Parse the entire SQL file and iterate statements via the SQL parser
   var ast: SqlNode
   try:
-    ast = parseSql(sql)
+    ast = parseSql($sql)
   except SqlParseError as e:
     echo "SQL Parse Error:\n", sql
     raise e
@@ -104,8 +121,13 @@ iterator tableDefs(sql: string): tuple[name, tableName, model: string] =
       yield (node[0].strVal.toLowerAscii(), $node[0], $node)
 
 iterator tablePairs*(sql: string): tuple[name, model: string] =
+  for name, _, model in tableDefs(DbSql(sql)):
+    yield (name, model)
+
+iterator tablePairs*(sql: DbSql): tuple[name, model: string] =
   for name, _, model in tableDefs(sql):
     yield (name, model)
+
 
 iterator tablePairs*(sql: Path): tuple[name, model: string] =
   let f = readFile($sql)
@@ -123,11 +145,11 @@ proc createTable*(db: DbConn; sqlFile: Path, name: string) =
       return
   raiseAssert &"table: {name} not found in: {sqlFile}"
 
-proc createTableStatic*(db: DbConn; schemaSql: static[string]) =
+proc createTable*(db: DbConn; schemaSql: DbSql) =
   for _, m in tablePairs(schemaSql):
     db.exec(sql(m))
 
-proc createTableStatic*(db: DbConn; schemaSql: static[string], name: string) =
+proc createTable*(db: DbConn; schemaSql: DbSql, name: string) =
   for n, m in tablePairs(schemaSql):
     if n == name:
       db.exec(sql(m))
@@ -135,21 +157,21 @@ proc createTableStatic*(db: DbConn; schemaSql: static[string], name: string) =
   raiseAssert &"table: {name} not found in static schema"
 
 proc dropTable*(db: DbConn; sqlFile: Path) =
-  for lookupName, tableName, _ in tableDefs(readFile($sqlFile)):
+  for lookupName, tableName, _ in tableDefs(readFile($sqlFile).DbSql):
     db.dropTableName(tableName, lookupName)
 
 proc dropTable*(db: DbConn; sqlFile: Path, name: string) =
-  for lookupName, tableName, _ in tableDefs(readFile($sqlFile)):
+  for lookupName, tableName, _ in tableDefs(readFile($sqlFile).DbSql):
     if lookupName == name:
       db.dropTableName(tableName, lookupName)
       return
   raiseAssert &"table: {name} not found in: {sqlFile}"
 
-proc dropTableStatic*(db: DbConn; schemaSql: static[string]) =
+proc dropTable*(db: DbConn; schemaSql: DbSql) =
   for lookupName, tableName, _ in tableDefs(schemaSql):
     db.dropTableName(tableName, lookupName)
 
-proc dropTableStatic*(db: DbConn; schemaSql: static[string], name: string) =
+proc dropTable*(db: DbConn; schemaSql: DbSql, name: string) =
   for lookupName, tableName, _ in tableDefs(schemaSql):
     if lookupName == name:
       db.dropTableName(tableName, lookupName)

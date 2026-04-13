@@ -28,8 +28,9 @@ TODO:
 1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you
 2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
 
-If you also need to create or drop tables from a schema embedded with `staticRead`, use `ormin/db_utils` and the explicit static helpers such as `createTableStatic` / `dropTableStatic`.
-For SQLite only, `-d:orminLegacySqliteDropNames` restores the older drop-table behavior that uses the normalized lookup name instead of the preserved SQL identifier.
+If you also need to create or drop tables from schema embedded at compile time, use `ormin/db_utils` with `staticLoad("schema.sql")`, which returns a `DbSql` value and sanity-checks the SQL during compilation. Pass that `DbSql` to the `createTable` / `dropTable` overloads.
+
+Note Ormin 0.6+ properly handles quoted table names in `dropTable`. SQlite previously worked with incorrectly quoted tables. The compile flag  `-d:orminLegacySqliteDropNames` restores the older drop-table behavior that uses the normalized lookup name instead of the preserved SQL identifier.
 
 ### SQLite
 

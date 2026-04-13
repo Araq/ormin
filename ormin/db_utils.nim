@@ -10,6 +10,7 @@ export paths
 type
   DbConn = db_postgres.DbConn | db_sqlite.DbConn
   DbId* = distinct string
+  DbSql* = distinct string
 
 proc `$`*(dbId: DbId): string {.borrow.}
 
@@ -69,14 +70,17 @@ proc quoteDbIdentifier*(name: string): DbId =
       partsSql.add(normalizedPart)
   DbId(partsSql.join("."))
 
-proc dropTableName(db: DbConn; tableName: string) =
+proc dropTableName(db: DbConn; tableName, lookupName: string) =
   # SQL parameters bind values, not identifiers, so DROP TABLE needs the
   # identifier rendered into the statement text with correct quoting.
-  let tableIdentSql = quoteDbIdentifier(tableName)
-  when defined(postgre):
-    db.exec(sql("drop table if exists " & $tableIdentSql & " cascade"))
+  when defined(sqlite) and defined(orminLegacySqliteDropNames):
+    db.exec(sql("drop table if exists " & lookupName))
   else:
-    db.exec(sql("drop table if exists " & $tableIdentSql))
+    let tableIdentSql = quoteDbIdentifier(tableName)
+    when defined(postgre):
+      db.exec(sql("drop table if exists " & $tableIdentSql & " cascade"))
+    else:
+      db.exec(sql("drop table if exists " & $tableIdentSql))
 
 iterator tableDefs(sql: string): tuple[name, tableName, model: string] =
   # Parse the entire SQL file and iterate statements via the SQL parser
@@ -131,23 +135,23 @@ proc createTableStatic*(db: DbConn; schemaSql: static[string], name: string) =
   raiseAssert &"table: {name} not found in static schema"
 
 proc dropTable*(db: DbConn; sqlFile: Path) =
-  for _, tableName, _ in tableDefs(readFile($sqlFile)):
-    db.dropTableName(tableName)
+  for lookupName, tableName, _ in tableDefs(readFile($sqlFile)):
+    db.dropTableName(tableName, lookupName)
 
 proc dropTable*(db: DbConn; sqlFile: Path, name: string) =
-  for n, tableName, _ in tableDefs(readFile($sqlFile)):
-    if n == name:
-      db.dropTableName(tableName)
+  for lookupName, tableName, _ in tableDefs(readFile($sqlFile)):
+    if lookupName == name:
+      db.dropTableName(tableName, lookupName)
       return
   raiseAssert &"table: {name} not found in: {sqlFile}"
 
 proc dropTableStatic*(db: DbConn; schemaSql: static[string]) =
-  for _, tableName, _ in tableDefs(schemaSql):
-    db.dropTableName(tableName)
+  for lookupName, tableName, _ in tableDefs(schemaSql):
+    db.dropTableName(tableName, lookupName)
 
 proc dropTableStatic*(db: DbConn; schemaSql: static[string], name: string) =
-  for n, tableName, _ in tableDefs(schemaSql):
-    if n == name:
-      db.dropTableName(tableName)
+  for lookupName, tableName, _ in tableDefs(schemaSql):
+    if lookupName == name:
+      db.dropTableName(tableName, lookupName)
       return
   raiseAssert &"table: {name} not found in static schema"

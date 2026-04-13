@@ -29,6 +29,7 @@ TODO:
 2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
 
 If you also need to create or drop tables from a schema embedded with `staticRead`, use `ormin/db_utils` and the explicit static helpers such as `createTableStatic` / `dropTableStatic`.
+For SQLite only, `-d:orminLegacySqliteDropNames` restores the older drop-table behavior that uses the normalized lookup name instead of the preserved SQL identifier.
 
 ### SQLite
 

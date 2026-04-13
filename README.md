@@ -28,9 +28,20 @@ TODO:
 1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you
 2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
 
-If you also need to create or drop tables from schema embedded at compile time, use `ormin/db_utils` with `staticLoad("schema.sql")`, which returns a `DbSql` value and sanity-checks the SQL during compilation. Pass that `DbSql` to the `createTable` / `dropTable` overloads.
+If you also need to create or drop tables from schema embedded at compile time, use `ormin/db_utils` with `staticLoad("schema.sql")`, which returns a `DbSql` value and sanity-checks the SQL during compilation. Pass that `DbSql` to the `createTable` / `dropTable` overloads:
 
-Note Ormin 0.6+ properly handles quoted table names in `dropTable`. SQlite previously worked with incorrectly quoted tables. The compile flag  `-d:orminLegacySqliteDropNames` restores the older drop-table behavior that uses the normalized lookup name instead of the preserved SQL identifier.
+```nim
+import ormin/db_utils
+
+const schema = staticLoad("model.sql")
+
+db.createTable(schema)
+db.createTable(schema, "quoted table")
+db.dropTable(schema)
+db.dropTable(schema, "quoted table")
+```
+
+Note: Ormin now properly handles quoted table names in `dropTable`. SQLite previously tolerated the older normalized-name behavior for some schemas. The compile flag `-d:orminLegacySqliteDropNames` restores that older drop-table behavior by using the normalized lookup name instead of the preserved SQL identifier.
 
 ### SQLite
 

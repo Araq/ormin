@@ -124,7 +124,7 @@ iterator tablePairs*(sql: string): tuple[name, model: string] =
   for name, _, model in tableDefs(DbSql(sql)):
     yield (name, model)
 
-iterator tablePairs*(sql: DbSql): tuple[name, model: string] =
+iterator tablePairs*(sql: static[DbSql]): tuple[name, model: string] =
   for name, _, model in tableDefs(sql):
     yield (name, model)
 
@@ -145,11 +145,11 @@ proc createTable*(db: DbConn; sqlFile: Path, name: string) =
       return
   raiseAssert &"table: {name} not found in: {sqlFile}"
 
-proc createTable*(db: DbConn; schemaSql: DbSql) =
+proc createTable*(db: DbConn; schemaSql: static[DbSql]) =
   for _, m in tablePairs(schemaSql):
     db.exec(sql(m))
 
-proc createTable*(db: DbConn; schemaSql: DbSql, name: string) =
+proc createTable*(db: DbConn; schemaSql: static[DbSql], name: string) =
   for n, m in tablePairs(schemaSql):
     if n == name:
       db.exec(sql(m))
@@ -157,21 +157,21 @@ proc createTable*(db: DbConn; schemaSql: DbSql, name: string) =
   raiseAssert &"table: {name} not found in static schema"
 
 proc dropTable*(db: DbConn; sqlFile: Path) =
-  for lookupName, tableName, _ in tableDefs(readFile($sqlFile).DbSql):
+  for lookupName, tableName, _ in tableDefs(DbSql(readFile($sqlFile))):
     db.dropTableName(tableName, lookupName)
 
 proc dropTable*(db: DbConn; sqlFile: Path, name: string) =
-  for lookupName, tableName, _ in tableDefs(readFile($sqlFile).DbSql):
+  for lookupName, tableName, _ in tableDefs(DbSql(readFile($sqlFile))):
     if lookupName == name:
       db.dropTableName(tableName, lookupName)
       return
   raiseAssert &"table: {name} not found in: {sqlFile}"
 
-proc dropTable*(db: DbConn; schemaSql: DbSql) =
+proc dropTable*(db: DbConn; schemaSql: static[DbSql]) =
   for lookupName, tableName, _ in tableDefs(schemaSql):
     db.dropTableName(tableName, lookupName)
 
-proc dropTable*(db: DbConn; schemaSql: DbSql, name: string) =
+proc dropTable*(db: DbConn; schemaSql: static[DbSql], name: string) =
   for lookupName, tableName, _ in tableDefs(schemaSql):
     if lookupName == name:
       db.dropTableName(tableName, lookupName)

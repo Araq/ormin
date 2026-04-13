@@ -3,6 +3,8 @@ import db_connector/db_common
 from db_connector/db_sqlite import open, exec, getValue
 import ormin/db_utils
 
+const usesLegacySqliteDropNames = defined(sqlite) and defined(orminLegacySqliteDropNames)
+
 let
   db {.global.} = open(":memory:", "", "", "")
   testDir = currentSourcePath.parentDir()
@@ -113,21 +115,21 @@ suite "db_utils: case and quoted names":
     db2.createTable(sqlFile)
     db2.dropTable(sqlFile, "quoted table2")
     let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table2'")
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countQuoted == "1"
     else:
       check countQuoted == "0"
 
     db2.dropTable(sqlFile, "upper_quoted")
     let countUpperQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'UPPER_QUOTED'")
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countUpperQuoted == "1"
     else:
       check countUpperQuoted == "0"
 
     db2.dropTable(sqlFile, "a\"b")
     let countEscapedQuoted = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name = 'A\"B'"))
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countEscapedQuoted == "1"
     else:
       check countEscapedQuoted == "0"
@@ -137,28 +139,28 @@ suite "db_utils: case and quoted names":
     db2.createTable(staticSqlContent)
     db2.dropTable(staticSqlContent, "quoted table2")
     let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table2'")
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countQuoted == "1"
     else:
       check countQuoted == "0"
 
     db2.dropTable(staticSqlContent, "upper_quoted")
     let countUpperQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'UPPER_QUOTED'")
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countUpperQuoted == "1"
     else:
       check countUpperQuoted == "0"
 
     db2.dropTable(staticSqlContent, "a\"b")
     let countEscapedQuoted = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name = 'A\"B'"))
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countEscapedQuoted == "1"
     else:
       check countEscapedQuoted == "0"
 
     db2.dropTable(staticSqlContent)
     let countAll = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name in ('lower_table','UPPER_TABLE','Quoted Table','Quoted Table2','UPPER_QUOTED','A\"B')"))
-    when defined(orminLegacySqliteDropNames):
+    when usesLegacySqliteDropNames:
       check countAll == "3"
     else:
       check countAll == "0"

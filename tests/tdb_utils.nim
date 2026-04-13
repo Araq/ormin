@@ -27,22 +27,58 @@ let sqlContent = """
   create table `Quoted Table2` (
     id integer primary key
   );
+
+  create table "UPPER_QUOTED" (
+    id integer primary key
+  );
+
+  create table "A""B" (
+    id integer primary key
+  );
 """
+
+const staticSqlContent = staticRead("db_utils_case_quoted.sql")
 
 writeFile($sqlFile, sqlContent)
 
 suite "db_utils: case and quoted names":
+  test "quoteDbIdentifier quotes and escapes identifiers":
+    check $quoteDbIdentifier("lower_table") == "\"lower_table\""
+    check $quoteDbIdentifier("UPPER_TABLE") == "\"upper_table\""
+    check $quoteDbIdentifier("\"Quoted Table\"") == "\"Quoted Table\""
+    check $quoteDbIdentifier("`Quoted Table2`") == "\"Quoted Table2\""
+    check $quoteDbIdentifier("'Quoted Table3'") == "\"Quoted Table3\""
+    check $quoteDbIdentifier("\"UPPER_TABLE\"") == "\"UPPER_TABLE\""
+    check $quoteDbIdentifier("\"A\"\"B\"") == "\"A\"\"B\""
+    check $quoteDbIdentifier("schema.table") == "\"schema\".\"table\""
+    check $quoteDbIdentifier("Schema.\"Mixed Table\"") == "\"schema\".\"Mixed Table\""
+    check $quoteDbIdentifier("weird\"name") == "\"weird\"\"name\""
+
   test "check tables names":
     let pairs = tablePairs(sqlContent).toSeq()
-    check pairs.len == 4
+    check pairs.len == 6
     check pairs[0][0] == ("lower_table")
     check pairs[1][0] == ("upper_table")
     check pairs[2][0] == ("quoted table")
     check pairs[3][0] == ("quoted table2")
+    check pairs[4][0] == ("upper_quoted")
+    check pairs[5][0] == ("a\"b")
 
     check pairs[0][1] == "create table lower_table(id  integer  primary key );"
     check pairs[1][1] == "create table UPPER_TABLE(id  integer  primary key );"
     check pairs[2][1] == "create table \"Quoted Table\"(id  integer  primary key );"
+    check pairs[4][1] == "create table \"UPPER_QUOTED\"(id  integer  primary key );"
+    check pairs[5][1] == "create table \"A\"\"B\"(id  integer  primary key );"
+
+  test "tablePairs parses compile-time SQL":
+    let pairs = tablePairs(staticSqlContent).toSeq()
+    check pairs.len == 6
+    check pairs[0][0] == "lower_table"
+    check pairs[1][0] == "upper_table"
+    check pairs[2][0] == "quoted table"
+    check pairs[3][0] == "quoted table2"
+    check pairs[4][0] == "upper_quoted"
+    check pairs[5][0] == "a\"b"
 
   test "createTable creates all tables from SQL file":
     db.createTable(sqlFile)
@@ -55,3 +91,49 @@ suite "db_utils: case and quoted names":
     db2.createTable(sqlFile, "quoted table")
     let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table'")
     check countQuoted == "1"
+
+  test "createTableStatic creates all tables from compile-time SQL":
+    let db2 = open(":memory:", "", "", "")
+    db2.createTableStatic(staticSqlContent)
+    let countAll = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name in ('lower_table','UPPER_TABLE','Quoted Table','Quoted Table2','UPPER_QUOTED','A\"B')"))
+    check countAll == "6"
+
+  test "createTableStatic with specific lowercased name matches quoted":
+    let db2 = open(":memory:", "", "", "")
+    db2.createTableStatic(staticSqlContent, "quoted table")
+    let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table'")
+    check countQuoted == "1"
+
+  test "dropTable handles quoted names from SQL file":
+    let db2 = open(":memory:", "", "", "")
+    db2.createTable(sqlFile)
+    db2.dropTable(sqlFile, "quoted table2")
+    let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table2'")
+    check countQuoted == "0"
+
+    db2.dropTable(sqlFile, "upper_quoted")
+    let countUpperQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'UPPER_QUOTED'")
+    check countUpperQuoted == "0"
+
+    db2.dropTable(sqlFile, "a\"b")
+    let countEscapedQuoted = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name = 'A\"B'"))
+    check countEscapedQuoted == "0"
+
+  test "dropTableStatic removes tables from compile-time SQL":
+    let db2 = open(":memory:", "", "", "")
+    db2.createTableStatic(staticSqlContent)
+    db2.dropTableStatic(staticSqlContent, "quoted table2")
+    let countQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'Quoted Table2'")
+    check countQuoted == "0"
+
+    db2.dropTableStatic(staticSqlContent, "upper_quoted")
+    let countUpperQuoted = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name = 'UPPER_QUOTED'")
+    check countUpperQuoted == "0"
+
+    db2.dropTableStatic(staticSqlContent, "a\"b")
+    let countEscapedQuoted = db2.getValue(sql("select count(*) from sqlite_master where type='table' and name = 'A\"B'"))
+    check countEscapedQuoted == "0"
+
+    db2.dropTableStatic(staticSqlContent)
+    let countAll = db2.getValue(sql"select count(*) from sqlite_master where type='table' and name in ('lower_table','UPPER_TABLE','Quoted Table')")
+    check countAll == "0"

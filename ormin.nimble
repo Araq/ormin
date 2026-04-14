@@ -19,6 +19,4 @@ feature "examples":
 
 import std/os
 when fileExists("config.nims"):
-import std/os
-when fileExists("config.nims"):
   include "config.nims"

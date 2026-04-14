@@ -18,7 +18,6 @@ Features:
 TODO:
 
 - Add support for UNION, INTERSECT and EXCEPT.
-- Transactions.
 - Better support for complex nested queries.
 - Write mysql backend.
 

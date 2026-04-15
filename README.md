@@ -18,15 +18,39 @@ Features:
 TODO:
 
 - Add support for UNION, INTERSECT and EXCEPT.
-- Transactions.
 - Better support for complex nested queries.
 - Write mysql backend.
 
 
 ## Schema and Database Setup
 
-1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. The macro runs the `ormin_importer` tool and includes the generated Nim code for you
+1. **Generate a model from SQL** – Place your schema in an `.sql` file and import it using `importModel`. By default this runs `ormin_importer` and includes the generated Nim code. Pass `includeStatic = true` to generate the model directly at compile time from the SQL file instead.
 2. **Create a database connection** – Ormin expects a global connection named `db` when issuing queries. The library ships drivers for SQLite and PostgreSQL; pick the matching backend in `importModel` and open a connection with Nim's database modules.
+
+### Static Schema
+
+The SQL file can be easily embedded at compile time. Import `ormin/db_utils` and use `const mySql = staticLoad("schema.sql")`, which returns a distinct string type `DbSql` after running sanity-checks the SQL. Pass that const `DbSql` to `createTable` / `dropTable` overloads:
+
+```nim
+import ormin/db_utils
+
+const schema = staticLoad("model.sql")
+
+db.createTable(schema)
+db.createTable(schema, "quoted table")
+db.dropTable(schema)
+db.dropTable(schema, "quoted table")
+```
+
+If you already use `importModel`, you can opt into the same static path directly there. `includeStatic = true` skips the generated `.nim` file, builds the model metadata from the `.sql` file at compile time, and exposes `sqlSchema` automatically:
+
+```nim
+import ../ormin
+importModel(DbBackend.sqlite, "model_sqlite", includeStatic = true)
+
+db.createTable(sqlSchema)
+db.dropTable(sqlSchema, "tb_timestamp")
+```
 
 ### SQLite
 
@@ -35,6 +59,8 @@ import ../ormin
 importModel(DbBackend.sqlite, "model_sqlite")
 let db {.global.} = open(":memory:", "", "", "")
 ```
+
+Note: Ormin now properly handles quoted table names in `dropTable`. The compile flag `-d:orminLegacySqliteDropNames` restores that older drop-table behavior by using the normalized lookup name instead of the preserved SQL identifier. The old behavior only worked in SQlite, not Postgres.
 
 ### PostgreSQL
 
@@ -267,6 +293,18 @@ for row in db.postsIter(userId):
 
 Both forms accept parameters matching the `?`/`%` placeholders and produce the same return types as an inline `query` block.
 
+Inline `query` blocks resolve `db` from the current lexical scope, so a proc parameter or local `db` binding can override the global connection when needed. This is useful for making procs which need to do complex handling:
+
+```nim
+proc loadUser(db: DbConn; userId: int): User =
+  let row = query:
+    select user(id, name, email)
+    where id == ?userId
+    limit 1
+
+  User(id: row.id, name: row.name, email: row.email)
+```
+
 ## Running Arbitrary SQL
 
 The standard `db_connector` APIs can be imported and used. For example:
@@ -283,7 +321,7 @@ discard db.getValue(sql"select setval('antibot_id_seq', 10, false)")
 
 ## Tooling
 
-The repository ships with `tools/ormin_importer`, invoked automatically by `importModel`, to parse SQL schema files into Nim type information.
+The repository ships with `tools/ormin_importer`, used by the default `importModel` path, to parse SQL schema files into Nim type information and write the generated `.nim` model file.
 
 ## Examples
 

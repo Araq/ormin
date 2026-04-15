@@ -17,10 +17,6 @@ Features:
 
 TODO:
 
-<<<<<<< HEAD
-=======
-- Add support for UNION, INTERSECT and EXCEPT.
->>>>>>> upstream/master
 - Better support for complex nested queries.
 - Write mysql backend.
 
@@ -106,7 +102,7 @@ let postsWithAuthors = query:
 
 # DISTINCT queries and COUNT(DISTINCT ...)
 let authorIds = query:
-  `distinct` Post(author)
+  selectDistinct(Post(author))
 let authorCount = query:
   select Post(count(distinct author))
 

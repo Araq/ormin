@@ -283,7 +283,7 @@ proc nodeName(n: NimNode): string {.compileTime.} =
 
 proc isQueryClause(name: string): bool {.compileTime.} =
   case name.toLowerAscii()
-  of "select", "distinct", "insert", "update", "replace", "delete",
+  of "select", "selectdistinct", "insert", "update", "replace", "delete",
       "where", "join", "innerjoin", "outerjoin", "groupby", "orderby",
       "having", "limit", "offset", "returning", "produce":
     result = true
@@ -338,6 +338,15 @@ proc flattenQueryCommands(n: NimNode; parts: var seq[NimNode]) {.compileTime.} =
   of nnkStmtList:
     for it in n:
       flattenQueryCommands(it, parts)
+  of nnkCall:
+    let name = nodeName(n[0])
+    if isQueryClause(name):
+      var cmd = newNimNode(nnkCommand)
+      for it in n:
+        cmd.add copyNimTree(it)
+      parts.add cmd
+    else:
+      parts.add copyNimTree(n)
   of nnkCommand:
     var cmd = copyNimTree(n)
     if cmd.len >= 2:
@@ -853,7 +862,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     q.head = "select "
     expectLen n, 2
     tableSel(n[1], q)
-  of "distinct":
+  of "selectDistinct":
     q.kind = qkSelect
     q.head = "select distinct "
     expectLen n, 2

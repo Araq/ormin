@@ -242,7 +242,7 @@ suite "query":
 
   test "distinct":
     var res = query:
-      `distinct` post(author)
+      selectDistinct(post(author))
     res.sort()
     let expected = postdata.mapIt(it.author).deduplicate().sortedByIt(it)
     check res == expected

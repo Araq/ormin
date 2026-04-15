@@ -240,6 +240,18 @@ suite "query":
       where id notin ?id1 .. ?id2
     check res == persondata.filterIt(it.id < id1 or it.id > id2)
 
+  test "distinct":
+    var res = query:
+      `distinct` post(author)
+    res.sort()
+    let expected = postdata.mapIt(it.author).deduplicate().sortedByIt(it)
+    check res == expected
+
+  test "count_distinct":
+    let res = query:
+      select post(count(distinct author))
+    check res == @[postdata.mapIt(it.author).deduplicate().len]
+
   test "limit":
     let id = 1
     let res = query:
@@ -400,6 +412,47 @@ suite "query":
       where id in (
         select post(author) groupby author having author == ?id)
     check res == @[id]
+
+  test "exists":
+    let authorid = postdata[0].author
+    let res = query:
+      select person(id)
+      where exists(select post(id) where author == ?authorid)
+    check res.sortedByIt(it) == persondata.mapIt(it.id)
+
+  test "not_exists":
+    let missingAuthor = personcount + postcount
+    let res = query:
+      select person(id)
+      where not exists(select post(id) where author == ?missingAuthor)
+    check res.sortedByIt(it) == persondata.mapIt(it.id)
+
+  test "union":
+    var res = query:
+      union(
+        select person(id) where id <= 2,
+        select person(id) where id >= 4
+      )
+    res.sort()
+    check res == @[1, 2, 4, 5]
+
+  test "intersect":
+    var res = query:
+      intersect(
+        select person(id) where id <= 3,
+        select person(id) where id >= 2
+      )
+    res.sort()
+    check res == @[2, 3]
+
+  test "except":
+    var res = query:
+      `except`(
+        select person(id) where id <= 4,
+        select person(id) where id in {2, 3}
+      )
+    res.sort()
+    check res == @[1, 4]
       
   test "complex_query_subquery_having":
     let
@@ -622,4 +675,3 @@ suite "query":
     check rows[1].id == 6 
     check rows[1].views == 77
     check rows[1].name == ""
-

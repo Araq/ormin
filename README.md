@@ -17,8 +17,6 @@ Features:
 
 TODO:
 
-- Add support for UNION, INTERSECT and EXCEPT.
-- Transactions.
 - Better support for complex nested queries.
 - Write mysql backend.
 
@@ -47,7 +45,7 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 
 ## Query DSL
 
-`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `where`, `join`, `orderby`, `groupby`, `limit` and `offset` are supported, and `returning` captures generated values (e.g. inserted IDs). Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
+`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `where`, `join`, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
 
 Example snippets:
 
@@ -74,6 +72,29 @@ let postsWithAuthors = query:
   select Post(title)
   join Author(name)
   where author.name == ?userName
+
+# DISTINCT queries and COUNT(DISTINCT ...)
+let authorIds = query:
+  `distinct` Post(author)
+let authorCount = query:
+  select Post(count(distinct author))
+
+# NULL predicates use `nil` or `null`
+let unassigned = query:
+  select Ticket(id)
+  where assignee == nil
+
+# EXISTS / NOT EXISTS subqueries
+let peopleWithPosts = query:
+  select Person(id)
+  where exists(select Post(id) where author == ?personId)
+
+# Set operations use function-call syntax
+let mergedIds = query:
+  union(
+    select Person(id) where id <= 2,
+    select Person(id) where id >= 4
+  )
 
 # Multiple joins with pagination
 let page = query:

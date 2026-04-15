@@ -269,6 +269,95 @@ proc fmtTableList(tableNames: openArray[string]): string =
     if i > 0: result.add ", "
     result.add t
 
+proc nodeName(n: NimNode): string {.compileTime.} =
+  case n.kind
+  of nnkIdent, nnkSym:
+    result = n.strVal
+  of nnkAccQuoted:
+    if n.len == 1:
+      result = nodeName(n[0])
+    else:
+      result = ""
+  else:
+    result = ""
+
+proc isQueryClause(name: string): bool {.compileTime.} =
+  case name.toLowerAscii()
+  of "select", "distinct", "insert", "update", "replace", "delete",
+      "where", "join", "innerjoin", "outerjoin", "groupby", "orderby",
+      "having", "limit", "offset", "returning", "produce":
+    result = true
+  else:
+    result = false
+
+proc isSetOpName(name: string): bool {.compileTime.} =
+  case name.toLowerAscii()
+  of "union", "intersect", "except":
+    result = true
+  else:
+    result = false
+
+proc isSetOpCall(n: NimNode): bool {.compileTime.} =
+  n.kind == nnkCall and isSetOpName(nodeName(n[0]))
+
+proc isNullLiteral(n: NimNode): bool {.compileTime.} =
+  case n.kind
+  of nnkNilLit:
+    result = true
+  of nnkIdent, nnkSym:
+    result = cmpIgnoreCase(n.strVal, "null") == 0
+  else:
+    result = false
+
+proc peelTrailingCommand(n: NimNode): tuple[core, tail: NimNode] {.compileTime.} =
+  if n.kind == nnkCommand and n.len == 2 and n[1].kind == nnkCommand and
+      nodeName(n[1][0]) == "on":
+    return (copyNimTree(n), newEmptyNode())
+
+  if n.kind == nnkCommand and n.len == 2 and n[1].kind == nnkCommand and
+      not isQueryClause(nodeName(n[0])) and not isSetOpName(nodeName(n[0])):
+    return (copyNimTree(n[0]), copyNimTree(n[1]))
+
+  if (n.kind == nnkCommand and (isQueryClause(nodeName(n[0])) or isSetOpName(nodeName(n[0])))) or
+      isSetOpCall(n):
+    return (copyNimTree(n), newEmptyNode())
+
+  if n.len > 0:
+    let idx = n.len - 1
+    let peeled = peelTrailingCommand(n[idx])
+    if peeled.tail.kind != nnkEmpty:
+      result.core = copyNimTree(n)
+      result.core[idx] = peeled.core
+      result.tail = peeled.tail
+      return
+
+  result = (copyNimTree(n), newEmptyNode())
+
+proc flattenQueryCommands(n: NimNode; parts: var seq[NimNode]) {.compileTime.} =
+  case n.kind
+  of nnkStmtList:
+    for it in n:
+      flattenQueryCommands(it, parts)
+  of nnkCommand:
+    var cmd = copyNimTree(n)
+    if cmd.len >= 2:
+      let idx = cmd.len - 1
+      let peeled = peelTrailingCommand(cmd[idx])
+      cmd[idx] = peeled.core
+      parts.add cmd
+      if peeled.tail.kind != nnkEmpty:
+        flattenQueryCommands(peeled.tail, parts)
+    else:
+      parts.add cmd
+  else:
+    parts.add copyNimTree(n)
+
+proc queryh(n: NimNode; q: QueryBuilder)
+proc queryAsString(q: QueryBuilder, n: NimNode): string
+proc applyQueryNode(n: NimNode; q: QueryBuilder)
+proc renderInlineQuery(n: NimNode; params: var Params;
+                       qb: QueryBuilder): tuple[sql: string, typ: DbType]
+
 proc lookupColumnInEnv(n: NimNode; q: var string; params: var Params;
                       expected: DbType, qb: QueryBuilder): DbType =
   expectKind(n, nnkIdent)
@@ -296,6 +385,9 @@ proc cond(n: NimNode; q: var string; params: var Params;
     if name == "_":
       q.add "*"
       result = DbType(kind: dbUnknown)
+    elif cmpIgnoreCase(name, "null") == 0:
+      q.add "NULL"
+      result = expected
     else:
       result = lookupColumnInEnv(n, q, params, expected, qb)
   of nnkDotExpr:
@@ -321,6 +413,12 @@ proc cond(n: NimNode; q: var string; params: var Params;
       checkCompatible(a, b, n[i])
     q.add ")"
     result = DbType(kind: dbSet)
+  of nnkNilLit:
+    q.add "NULL"
+    result = expected
+  of nnkDistinctTy:
+    q.add "distinct "
+    result = cond(n[0], q, params, expected, qb)
   of nnkStrLit, nnkRStrLit, nnkTripleStrLit:
     result = expected
     if result.kind == dbUnknown:
@@ -357,20 +455,32 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let b = cond(n[2], q, params, result, qb)
       checkBool b, n[2]
     of "<=", "<", ">=", ">", "==", "!=", "=~":
-      let env = qb.env
-      if env.len == 2:
-        qb.env = @[env[0]]
-      let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
-      q.add ' '
-      if op == "==": q.add equals
-      elif op == "!=": q.add nequals
-      elif op == "=~": q.add "like"
-      else: q.add op
-      q.add ' '
-      if env.len == 2:
-        qb.env = @[env[1]]
-      let b = cond(n[2], q, params, a, qb)
-      checkCompatible a, b, n
+      if isNullLiteral(n[1]) or isNullLiteral(n[2]):
+        if op != "==" and op != "!=":
+          macros.error "NULL comparisons only support == and !=", n
+        if isNullLiteral(n[1]) and isNullLiteral(n[2]):
+          macros.error "NULL cannot be compared against NULL", n
+        let target = if isNullLiteral(n[1]): n[2] else: n[1]
+        discard cond(target, q, params, DbType(kind: dbUnknown), qb)
+        if op == "==":
+          q.add " is NULL"
+        else:
+          q.add " is not NULL"
+      else:
+        let env = qb.env
+        if env.len == 2:
+          qb.env = @[env[0]]
+        let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
+        q.add ' '
+        if op == "==": q.add equals
+        elif op == "!=": q.add nequals
+        elif op == "=~": q.add "like"
+        else: q.add op
+        q.add ' '
+        if env.len == 2:
+          qb.env = @[env[1]]
+        let b = cond(n[2], q, params, a, qb)
+        checkCompatible a, b, n
       result = DbType(kind: dbBool)
     of "in", "notin":
       let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
@@ -442,7 +552,20 @@ proc cond(n: NimNode; q: var string; params: var Params;
       q.add ' '
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
   of nnkCall:
-    let op = $n[0]
+    let op = nodeName(n[0])
+    if isSetOpCall(n):
+      let subq = renderInlineQuery(n, params, qb)
+      q.add subq.sql
+      result = subq.typ
+      return
+    if op == "exists":
+      expectLen n, 2
+      let subq = renderInlineQuery(n[1], params, qb)
+      q.add "exists ("
+      q.add subq.sql
+      q.add ")"
+      result = DbType(kind: dbBool)
+      return
     if op == "asc" or op == "desc":
       expectLen n, 2
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
@@ -481,65 +604,11 @@ proc cond(n: NimNode; q: var string; params: var Params;
       else: checkCompatible(result, t, x)
     q.add "\Lend"
   of nnkCommand:
-    # select subquery
-    if n.len == 2 and $n[0] == "select" and n[1].kind == nnkCall:
-      let call = n[1]
-      let tab = $call[0]
-      let tabIndex = tableNames.lookup(tab)
-      if tabIndex < 0:
-        macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
-      else:
-        let alias = qb.getAlias(tabIndex)
-        var subenv = @[(tabIndex, alias)]
-        swap(qb.env, subenv)
-        var subselect = "select "
-        for i in 1..<call.len:
-          if i > 1: subselect.add ", "
-          discard cond(call[i], subselect, params, DbType(kind: dbUnknown), qb)
-        subselect.add " from "
-        escIdent(subselect, tab)
-        subselect.add " as " & alias
-        q.add subselect
-        swap(qb.env, subenv)
-    elif n.len == 2 and $n[0] == "select" and n[1].kind == nnkCommand:
-      result = DbType(kind: dbSet)
-      let cmd = n[1]
-      var subselect = "select "
-      var subenv = qb.env
-      if cmd.len >= 1 and cmd[0].kind == nnkCall:
-        let call = cmd[0]
-        let tab = $call[0]
-        let tabIndex = tableNames.lookup(tab)
-        if tabIndex < 0:
-          macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
-        else:
-          let alias = qb.getAlias(tabIndex)
-          qb.env = @[(tabindex, alias)]
-          for i in 1..<call.len:
-            if i > 1: subselect.add ", "
-            discard cond(call[i], subselect, params, DbType(kind: dbUnknown), qb)
-          subselect.add " from "
-          escIdent(subselect, tab)
-          subselect.add " as " & alias
-      if cmd.len == 2:
-        if cmd[1].kind in nnkCallKinds and $cmd[1][0] == "where":
-          subselect.add " where "
-          discard cond(cmd[1][1], subselect, params, DbType(kind: dbBool), qb)
-        elif cmd[1].kind in nnkCallKinds and $cmd[1][0] == "groupby":
-          subselect.add " group by "
-          let hav = cmd[1][1]
-          if hav.kind in nnkCallKinds and $hav[1][0] == "having":
-            discard cond(hav[0], subselect, params, DbType(kind: dbBool), qb)
-            subselect.add " having "
-            discard cond(hav[1][1], subselect, params, DbType(kind: dbBool), qb)
-          else:
-            discard cond(hav, subselect, params, DbType(kind: dbBool), qb)
-        else:
-          macros.error "construct not supported in condition: " & treeRepr cmd, cmd
-      elif cmd.len >= 2:
-        macros.error "construct not supported in condition: " & treeRepr cmd, cmd
-      qb.env = subenv
-      q.add subselect
+    let head = nodeName(n[0])
+    if head == "select" or head == "distinct":
+      let subq = renderInlineQuery(n, params, qb)
+      q.add subq.sql
+      result = subq.typ
     else:
       macros.error "construct not supported in condition: " & treeRepr n, n
   else:
@@ -777,11 +846,16 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
 
 proc queryh(n: NimNode; q: QueryBuilder) =
   expectKind n, nnkCommand
-  let kind = $n[0]
+  let kind = nodeName(n[0])
   case kind
   of "select":
     q.kind = qkSelect
     q.head = "select "
+    expectLen n, 2
+    tableSel(n[1], q)
+  of "distinct":
+    q.kind = qkSelect
+    q.head = "select distinct "
     expectLen n, 2
     tableSel(n[1], q)
   of "insert":
@@ -952,6 +1026,82 @@ proc queryAsString(q: QueryBuilder, n: NimNode): string =
   when defined(debugOrminSql):
     macros.hint("Ormin SQL:\n" & $result, n)
 
+proc sameReturnShape(a, b: NimNode): bool {.compileTime.} =
+  if a.len != b.len:
+    return false
+  for i in 0..<a.len:
+    let at = if a[i].kind == nnkIdentDefs and a[i].len > 1: a[i][1] else: a[i]
+    let bt = if b[i].kind == nnkIdentDefs and b[i].len > 1: b[i][1] else: b[i]
+    if repr(at) != repr(bt):
+      return false
+  result = true
+
+proc buildSetOpQuery(n: NimNode; q: QueryBuilder) {.compileTime.} =
+  if q.kind != qkNone or q.head.len > 0 or q.params.len > 0:
+    macros.error "set operations must form the whole query", n
+  if n.len < 3:
+    macros.error "set operations require at least two queries", n
+
+  let op = nodeName(n[0]).toLowerAscii()
+  q.kind = qkSelect
+  q.singleRow = false
+
+  for i in 1..<n.len:
+    var branch = newQueryBuilder()
+    branch.qmark = q.qmark
+    applyQueryNode(n[i], branch)
+    if branch.kind notin {qkSelect, qkJoin}:
+      macros.error "set operations only support select-style queries", n[i]
+
+    if i > 1:
+      q.head.add "\L" & op & "\L"
+    if isSetOpCall(n[i]):
+      q.head.add "("
+      q.head.add queryAsString(branch, n[i])
+      q.head.add ")"
+    else:
+      q.head.add queryAsString(branch, n[i])
+
+    q.qmark = branch.qmark
+    for p in branch.params:
+      q.params.add p
+
+    if i == 1:
+      q.retType = branch.retType
+      q.retNames = branch.retNames
+      q.retTypeIsJson = branch.retTypeIsJson
+    elif branch.retTypeIsJson != q.retTypeIsJson or
+        not sameReturnShape(branch.retType, q.retType):
+      macros.error "all set operation branches must return the same types", n[i]
+
+proc applyQueryNode(n: NimNode; q: QueryBuilder) =
+  if isSetOpCall(n):
+    buildSetOpQuery(n, q)
+    return
+
+  var flattened: seq[NimNode]
+  flattenQueryCommands(n, flattened)
+  for part in flattened:
+    if isSetOpCall(part):
+      buildSetOpQuery(part, q)
+    elif part.kind == nnkCommand:
+      queryh(part, q)
+    else:
+      macros.error "illformed query", part
+
+proc renderInlineQuery(n: NimNode; params: var Params;
+                       qb: QueryBuilder): tuple[sql: string, typ: DbType] =
+  var subq = newQueryBuilder()
+  subq.qmark = qb.qmark
+  applyQueryNode(n, subq)
+  if subq.kind notin {qkSelect, qkJoin}:
+    macros.error "subqueries require a select-style query", n
+  qb.qmark = subq.qmark
+  for p in subq.params:
+    params.add p
+  result.sql = queryAsString(subq, n)
+  result.typ = DbType(kind: dbSet)
+
 proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
   result = newTree(nnkVarSection,
     newTree(nnkIdentDefs, newTree(nnkPragmaExpr, name,
@@ -969,9 +1119,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   expectMinLen body, 1
 
   q.retTypeIsJson = produceJson
-  for b in body:
-    if b.kind == nnkCommand: queryh(b, q)
-    else: macros.error "illformed query", b
+  applyQueryNode(body, q)
   let sql = queryAsString(q, body)
   let prepStmt = genSym(nskLet)
   let res = genSym(nskVar)
@@ -1192,9 +1340,7 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   expectMinLen query, 1
 
   var q = newQueryBuilder()
-  for b in query:
-    if b.kind == nnkCommand: queryh(b, q)
-    else: macros.error "illformed query", b
+  applyQueryNode(query, q)
   if q.kind notin {qkSelect, qkJoin}:
     macros.error "query must be a 'select' or 'join'", query
   let sql = queryAsString(q, query)

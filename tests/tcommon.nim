@@ -412,3 +412,42 @@ suite "composite_pk":
       select tb_composite_pk(pk1, pk2, message)
       produce json
     check res == %*cps.mapIt(%*{"pk1": it[0], "pk2": it[1], "message": it[2]})
+
+
+suite "nullable":
+  setup:
+    db.dropTable(sqlFile, "tb_nullable")
+    db.createTable(sqlFile, "tb_nullable")
+    query:
+      insert tb_nullable(id = 1, note = nil)
+    query:
+      insert tb_nullable(id = 2, note = "hello")
+
+  test "where_null":
+    let res = query:
+      select tb_nullable(id)
+      where note == nil
+    check res == @[1]
+
+  test "where_not_null":
+    let res = query:
+      select tb_nullable(id)
+      where note != null
+    check res == @[2]
+
+  test "update_to_null":
+    query:
+      update tb_nullable(note = null)
+      where id == 2
+    let res = query:
+      select tb_nullable(id)
+      where note == nil
+    check res == @[1, 2]
+
+  test "json_null":
+    let res = query:
+      select tb_nullable(id, note)
+      orderby id
+      produce json
+    check res[0]["note"].kind == JNull
+    check res[1]["note"].getStr == "hello"

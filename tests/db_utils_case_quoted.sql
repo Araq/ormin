@@ -16,3 +16,11 @@
   create table `Quoted Table2` (
     id integer primary key
   );
+
+  create table "UPPER_QUOTED" (
+    id integer primary key
+  );
+
+  create table "A""B" (
+    id integer primary key
+  );

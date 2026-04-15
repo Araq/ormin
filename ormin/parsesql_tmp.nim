@@ -1093,7 +1093,10 @@ proc parseUnique(p: var SqlParser): SqlNode =
 proc parseTableDef(p: var SqlParser): SqlNode =
   result = parseIfNotExists(p, nkCreateTable)
   expectIdent(p)
-  result.add(newNode(nkIdent, p.tok.literal))
+  if p.tok.kind == tkQuotedIdentifier:
+    result.add(newNode(nkQuotedIdent, p.tok.literal))
+  else:
+    result.add(newNode(nkIdent, p.tok.literal))
   getTok(p)
   if p.tok.kind == tkParLe:
     getTok(p)

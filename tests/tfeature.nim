@@ -75,6 +75,21 @@ suite "query":
     doAssert compiles(block:
       discard query:
         select post(author)
+        outerjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        leftjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        leftouterjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
         rightjoin person(name) on author == id
     )
     doAssert compiles(block:
@@ -613,6 +628,15 @@ suite "query":
     let res = query:
       select post(author)
       leftjoin person(name) on author == id
+      where id == ?postid
+    let (author, name) = res[0]
+    check name == persondata[author - 1].name
+
+  test "leftouterjoin_on":
+    let postid = 1
+    let res = query:
+      select post(author)
+      leftouterjoin person(name) on author == id
       where id == ?postid
     let (author, name) = res[0]
     check name == persondata[author - 1].name

@@ -1050,43 +1050,52 @@ proc sameReturnShape(a, b: NimNode): bool {.compileTime.} =
       return false
   result = true
 
-proc buildSetOpQuery(n: NimNode; q: QueryBuilder) {.compileTime.} =
+proc buildSetOpQueryParts(op: string; branches: openArray[NimNode];
+                          q: QueryBuilder; lineInfo: NimNode) {.compileTime.} =
   if q.kind != qkNone or q.head.len > 0 or q.params.len > 0:
-    macros.error "set operations must form the whole query", n
-  if n.len < 3:
-    macros.error "set operations require at least two queries", n
+    macros.error "set operations must form the whole query", lineInfo
+  if branches.len < 2:
+    macros.error "set operations require at least two queries", lineInfo
 
-  let op = nodeName(n[0]).toLowerAscii()
   q.kind = qkSelect
   q.singleRow = false
 
-  for i in 1..<n.len:
+  for i, branchNode in branches:
     var branch = newQueryBuilder()
     branch.qmark = q.qmark
-    applyQueryNode(n[i], branch)
+    applyQueryNode(branchNode, branch)
     if branch.kind notin {qkSelect, qkJoin}:
-      macros.error "set operations only support select-style queries", n[i]
+      macros.error "set operations only support select-style queries", branchNode
 
-    if i > 1:
+    if i > 0:
       q.head.add "\L" & op & "\L"
-    if isSetOpCall(n[i]):
+    if isSetOpCall(branchNode):
       q.head.add "("
-      q.head.add queryAsString(branch, n[i])
+      q.head.add queryAsString(branch, branchNode)
       q.head.add ")"
     else:
-      q.head.add queryAsString(branch, n[i])
+      q.head.add queryAsString(branch, branchNode)
 
     q.qmark = branch.qmark
     for p in branch.params:
       q.params.add p
 
-    if i == 1:
+    if i == 0:
       q.retType = branch.retType
       q.retNames = branch.retNames
       q.retTypeIsJson = branch.retTypeIsJson
     elif branch.retTypeIsJson != q.retTypeIsJson or
         not sameReturnShape(branch.retType, q.retType):
-      macros.error "all set operation branches must return the same types", n[i]
+      macros.error "all set operation branches must return the same types", branchNode
+
+proc buildSetOpQuery(n: NimNode; q: QueryBuilder) {.compileTime.} =
+  var branches: seq[NimNode] = @[]
+  for i in 1..<n.len:
+    branches.add n[i]
+  buildSetOpQueryParts(nodeName(n[0]).toLowerAscii(), branches, q, n)
+
+proc isSetOpToken(n: NimNode): bool {.compileTime.} =
+  n.kind in {nnkIdent, nnkSym, nnkAccQuoted} and isSetOpName(nodeName(n))
 
 proc applyQueryNode(n: NimNode; q: QueryBuilder) =
   if isSetOpCall(n):
@@ -1095,6 +1104,42 @@ proc applyQueryNode(n: NimNode; q: QueryBuilder) =
 
   var flattened: seq[NimNode]
   flattenQueryCommands(n, flattened)
+  var hasInfixSetOp = false
+  for part in flattened:
+    if isSetOpToken(part):
+      hasInfixSetOp = true
+      break
+
+  if hasInfixSetOp:
+    var op = ""
+    var branches: seq[NimNode] = @[]
+    var currentBranch = newStmtList()
+    proc flushBranch(lineInfo: NimNode) {.compileTime.} =
+      if currentBranch.len == 0:
+        macros.error "expected query before set operation", lineInfo
+      branches.add currentBranch
+      currentBranch = newStmtList()
+    for part in flattened:
+      if isSetOpToken(part):
+        let currentOp = nodeName(part).toLowerAscii()
+        if op.len == 0:
+          op = currentOp
+        elif op != currentOp:
+          macros.error "mixed infix set operations are not supported; use nesting for precedence", part
+        flushBranch(part)
+      else:
+        if part.kind == nnkCommand or isSetOpCall(part):
+          currentBranch.add part
+        else:
+          macros.error "illformed query", part
+    if op.len == 0:
+      macros.error "expected set operation between queries", n
+    if currentBranch.len == 0:
+      macros.error "set operation requires a query after " & op, n
+    branches.add currentBranch
+    buildSetOpQueryParts(op, branches, q, n)
+    return
+
   for part in flattened:
     if isSetOpCall(part):
       buildSetOpQuery(part, q)

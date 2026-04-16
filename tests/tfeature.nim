@@ -429,6 +429,13 @@ suite "query":
 
   test "union":
     var res = query:
+      select person(id) where id <= 2
+      union
+      select person(id) where id >= 4
+    res.sort()
+    check res == @[1, 2, 4, 5]
+
+    res = query:
       union(
         select person(id) where id <= 2,
         select person(id) where id >= 4
@@ -438,6 +445,13 @@ suite "query":
 
   test "intersect":
     var res = query:
+      select person(id) where id <= 3
+      intersect
+      select person(id) where id >= 2
+    res.sort()
+    check res == @[2, 3]
+
+    res = query:
       intersect(
         select person(id) where id <= 3,
         select person(id) where id >= 2
@@ -447,6 +461,13 @@ suite "query":
 
   test "except":
     var res = query:
+      select person(id) where id <= 4
+      `except`
+      select person(id) where id in {2, 3}
+    res.sort()
+    check res == @[1, 4]
+
+    res = query:
       `except`(
         select person(id) where id <= 4,
         select person(id) where id in {2, 3}

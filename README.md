@@ -116,12 +116,11 @@ let peopleWithPosts = query:
   select Person(id)
   where exists(select Post(id) where author == ?personId)
 
-# Set operations use function-call syntax
+# Set operations can be written inline between select queries
 let mergedIds = query:
-  union(
-    select Person(id) where id <= 2,
-    select Person(id) where id >= 4
-  )
+  select Person(id) where id <= 2
+  union
+  select Person(id) where id >= 4
 
 # Multiple joins with pagination
 let page = query:

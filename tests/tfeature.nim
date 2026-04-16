@@ -267,6 +267,27 @@ suite "query":
       where id notin ?id1 .. ?id2
     check res == persondata.filterIt(it.id < id1 or it.id > id2)
 
+  test "predicate_like":
+    let pattern = "john1%"
+    let res = query:
+      select person(id, name)
+      where name `like` ?pattern
+    check res == persondata.filterIt(it.name.startsWith("john1")).mapIt((it.id, it.name))
+
+  test "predicate_ilike":
+    let pattern = "JOHN1%"
+    let res = query:
+      select person(id, name)
+      where name `ilike` ?pattern
+    check res == persondata.filterIt(it.name.startsWith("john1")).mapIt((it.id, it.name))
+
+  test "predicate_not_like":
+    let pattern = "john1%"
+    let res = query:
+      select person(id, name)
+      where not (name `like` ?pattern)
+    check res == persondata.filterIt(not it.name.startsWith("john1")).mapIt((it.id, it.name))
+
   test "distinct":
     var res = query:
       select `distinct` post(author)

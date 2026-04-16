@@ -391,6 +391,10 @@ proc peelTrailingCommand(n: NimNode): tuple[core, tail: NimNode] {.compileTime.}
     return (copyNimTree(n), newEmptyNode())
 
   if n.kind == nnkCommand and n.len == 2 and n[1].kind == nnkCommand and
+      nodeName(n[1][0]).toLowerAscii() in ["like", "ilike"]:
+    return (copyNimTree(n), newEmptyNode())
+
+  if n.kind == nnkCommand and n.len == 2 and n[1].kind == nnkCommand and
       not isQueryClause(nodeName(n[0])) and not isSetOpName(nodeName(n[0])):
     return (copyNimTree(n[0]), copyNimTree(n[1]))
 
@@ -725,6 +729,40 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let subq = renderInlineQuery(n, params, qb)
       q.add subq.sql
       result = subq.typ
+    elif n.len == 2 and n[1].kind == nnkCommand and n[1].len == 2:
+      let op = nodeName(n[1][0]).toLowerAscii()
+      if op in ["like", "ilike"]:
+        let env = qb.env
+        if env.len == 2:
+          qb.env = @[env[0]]
+        let a =
+          if op == "ilike" and dbBackend == DbBackend.sqlite:
+            q.add "lower("
+            let t = cond(n[0], q, params, DbType(kind: dbUnknown), qb)
+            q.add ")"
+            t
+          else:
+            cond(n[0], q, params, DbType(kind: dbUnknown), qb)
+        q.add " "
+        if op == "ilike" and dbBackend != DbBackend.sqlite:
+          q.add "ilike"
+        else:
+          q.add "like"
+        q.add " "
+        if env.len == 2:
+          qb.env = @[env[1]]
+        let b =
+          if op == "ilike" and dbBackend == DbBackend.sqlite:
+            q.add "lower("
+            let t = cond(n[1][1], q, params, a, qb)
+            q.add ")"
+            t
+          else:
+            cond(n[1][1], q, params, a, qb)
+        checkCompatible a, b, n
+        result = DbType(kind: dbBool)
+      else:
+        macros.error "construct not supported in condition: " & treeRepr n, n
     else:
       macros.error "construct not supported in condition: " & treeRepr n, n
   else:

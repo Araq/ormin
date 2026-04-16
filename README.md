@@ -111,6 +111,11 @@ let unassigned = query:
   select Ticket(id)
   where assignee == nil
 
+# Pattern matching uses backticked infix operators
+let matchingPeople = query:
+  select Person(id, name)
+  where name `like` ?"john%"
+
 # EXISTS / NOT EXISTS subqueries
 let peopleWithPosts = query:
   select Person(id)

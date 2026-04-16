@@ -283,7 +283,7 @@ proc nodeName(n: NimNode): string {.compileTime.} =
 
 proc isQueryClause(name: string): bool {.compileTime.} =
   case name.toLowerAscii()
-  of "select", "selectdistinct", "insert", "update", "replace", "delete",
+  of "select", "distinct", "insert", "update", "replace", "delete",
       "where", "join", "innerjoin", "outerjoin", "groupby", "orderby",
       "having", "limit", "offset", "returning", "produce":
     result = true
@@ -861,8 +861,13 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     q.kind = qkSelect
     q.head = "select "
     expectLen n, 2
-    tableSel(n[1], q)
-  of "selectDistinct":
+    if n[1].kind == nnkCommand and nodeName(n[1][0]) == "distinct":
+      expectLen n[1], 2
+      q.head = "select distinct "
+      tableSel(n[1][1], q)
+    else:
+      tableSel(n[1], q)
+  of "distinct":
     q.kind = qkSelect
     q.head = "select distinct "
     expectLen n, 2

@@ -102,7 +102,7 @@ let postsWithAuthors = query:
 
 # DISTINCT queries and COUNT(DISTINCT ...)
 let authorIds = query:
-  selectDistinct(Post(author))
+  select `distinct` Post(author)
 let authorCount = query:
   select Post(count(distinct author))
 

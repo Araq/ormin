@@ -236,8 +236,8 @@ proc sourceLookup(q: QueryBuilder; table: string): int {.compileTime.} =
 
 proc sourceAlias(q: QueryBuilder; source: int; sourceName: string): string {.compileTime.} =
   if q.kind == qkJoin and q.env.len > 0 and q.env[^1][0] == source:
-    return q.env[^1][1]
-  if isCteEnvIndex(source):
+    result = q.env[^1][1]
+  elif isCteEnvIndex(source):
     result = sourceName.toLowerAscii() & $q.aliasGen
     inc q.aliasGen
   else:
@@ -409,7 +409,7 @@ proc peelTrailingCommand(n: NimNode): tuple[core, tail: NimNode] {.compileTime.}
       result.core = copyNimTree(n)
       result.core[idx] = peeled.core
       result.tail = peeled.tail
-      return
+      return result
 
   result = (copyNimTree(n), newEmptyNode())
 

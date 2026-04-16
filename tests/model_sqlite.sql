@@ -41,3 +41,8 @@ create table if not exists tb_blob(
   id integer primary key,
   typblob blob not null
 );
+
+create table if not exists tb_nullable(
+  id integer primary key,
+  note text null
+);

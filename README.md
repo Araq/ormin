@@ -17,7 +17,6 @@ Features:
 
 TODO:
 
-- Add support for UNION, INTERSECT and EXCEPT.
 - Better support for complex nested queries.
 - Write mysql backend.
 
@@ -73,7 +72,7 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 
 ## Query DSL
 
-`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `where`, `join`, `orderby`, `groupby`, `limit` and `offset` are supported, and `returning` captures generated values (e.g. inserted IDs). Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
+`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, window expressions, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
 
 Example snippets:
 
@@ -92,7 +91,7 @@ query:
 # Explicit join with filter
 let rows = query:
   select Post(author)
-  join Person(name) on author == id
+  leftjoin Person(name) on author == id
   where id == ?postId
 
 # Automatic join generated from foreign keys
@@ -100,6 +99,42 @@ let postsWithAuthors = query:
   select Post(title)
   join Author(name)
   where author.name == ?userName
+
+# DISTINCT queries and COUNT(DISTINCT ...)
+let authorIds = query:
+  select `distinct` Post(author)
+let authorCount = query:
+  select Post(count(distinct author))
+
+# NULL predicates use `nil` or `null`
+let unassigned = query:
+  select Ticket(id)
+  where assignee == nil
+
+# Pattern matching uses backticked infix operators
+let matchingPeople = query:
+  select Person(id, name)
+  where name `like` ?"john%"
+
+# EXISTS / NOT EXISTS subqueries
+let peopleWithPosts = query:
+  select Person(id)
+  where exists(select Post(id) where author == ?personId)
+
+# CTEs use with cteName(select ...)
+let recentAuthors = query:
+  with recent(select Post(id, author) where id <= 3)
+  select recent(author)
+
+# Window functions use over(expr, ...)
+let rankedPosts = query:
+  select Post(author, id, over(row_number(), partitionby(author), orderby(id)) as rn)
+
+# Set operations can be written inline between select queries
+let mergedIds = query:
+  select Person(id) where id <= 2
+  union
+  select Person(id) where id >= 4
 
 # Multiple joins with pagination
 let page = query:
@@ -123,7 +158,7 @@ Compile with `-d:debugOrminSql` to see the produced SQL at build time, which hel
 
 Selecting columns for the primary table is done using the syntax `select Post(title, author, ...)` where `Post` is the table and `title`, `author`, etc are columns of that table. This will return a tuple containing `(title, author, ...)`. Only one table can be selected and columns must be from that table. Unlike in SQL, columns for joined tables are selected directly in the `join` syntax.
 
-Joins use the syntax `join Person(name, city) on author == id` where `Person` is the table and the columns `name`, and `city` are columns of that table. Often the join condition can be inferred from foreign keys and can be left out: `join Author(name, city)`. The columns listed in the joined tabled will be appended to the results tuple, i.e. `(title, author, name, city)`. Supported joins are: `join`, `innerjoin`, `outerjoin`.
+Joins use the syntax `join Person(name, city) on author == id` where `Person` is the table and the columns `name`, and `city` are columns of that table. Often the join condition can be inferred from foreign keys and can be left out: `join Author(name, city)`. The columns listed in the joined tabled will be appended to the results tuple, i.e. `(title, author, name, city)`. Supported joins are: `join`, `innerjoin`, `leftjoin`, `leftouterjoin`, `rightjoin`, `rightouterjoin`, `fulljoin`, `fullouterjoin`, `crossjoin`, and the legacy `outerjoin`. Runtime support for `rightjoin` / `fulljoin` still depends on the SQL backend.
 
 The join syntax differs from SQL but simplifies selecting fields from multiple tables by making them more explicit while still maintaing SQL's full query capabilities.
 

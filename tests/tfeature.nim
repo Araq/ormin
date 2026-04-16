@@ -66,6 +66,48 @@ suite "query":
   db.dropTable(sqlFilePath)
   db.createTable(sqlFilePath)
 
+  static:
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        crossjoin person(name)
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        outerjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        leftjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        leftouterjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        rightjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        rightouterjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        fulljoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        fullouterjoin person(name) on author == id
+    )
+
   # prepare data to insert  
   for i in 1..personcount:
     persondata.add((id: i,
@@ -240,6 +282,61 @@ suite "query":
       where id notin ?id1 .. ?id2
     check res == persondata.filterIt(it.id < id1 or it.id > id2)
 
+  test "predicate_like":
+    let pattern = "john1%"
+    let res = query:
+      select person(id, name)
+      where name `like` ?pattern
+    check res == persondata.filterIt(it.name.startsWith("john1")).mapIt((it.id, it.name))
+
+  test "predicate_ilike":
+    let pattern = "JOHN1%"
+    let res = query:
+      select person(id, name)
+      where name `ilike` ?pattern
+    check res == persondata.filterIt(it.name.startsWith("john1")).mapIt((it.id, it.name))
+
+  test "predicate_not_like":
+    let pattern = "john1%"
+    let res = query:
+      select person(id, name)
+      where not (name `like` ?pattern)
+    check res == persondata.filterIt(not it.name.startsWith("john1")).mapIt((it.id, it.name))
+
+  test "distinct":
+    var res = query:
+      select `distinct` post(author)
+    res.sort()
+    let expected = postdata.mapIt(it.author).deduplicate().sortedByIt(it)
+    check res == expected
+
+  test "count_distinct":
+    let res = query:
+      select post(count(distinct author))
+    check res == @[postdata.mapIt(it.author).deduplicate().len]
+
+  test "window_row_number":
+    let res = query:
+      select post(author, id, over(row_number(), partitionby(author), orderby(id)) as rn)
+      orderby author, id
+    var expected: seq[(int, int, int)] = @[]
+    var counters = initCountTable[int]()
+    for p in postdata.sortedByIt((it.author, it.id)):
+      counters.inc(p.author)
+      expected.add((p.author, p.id, counters[p.author]))
+    check res == expected
+
+  test "window_running_sum":
+    let res = query:
+      select post(author, id, over(sum(id), partitionby(author), orderby(id)) as running)
+      orderby author, id
+    var expected: seq[(int, int, int)] = @[]
+    var sums = initTable[int, int]()
+    for p in postdata.sortedByIt((it.author, it.id)):
+      sums[p.author] = sums.getOrDefault(p.author) + p.id
+      expected.add((p.author, p.id, sums[p.author]))
+    check res == expected
+
   test "limit":
     let id = 1
     let res = query:
@@ -400,6 +497,89 @@ suite "query":
       where id in (
         select post(author) groupby author having author == ?id)
     check res == @[id]
+
+  test "exists":
+    let authorid = postdata[0].author
+    let res = query:
+      select person(id)
+      where exists(select post(id) where author == ?authorid)
+    check res.sortedByIt(it) == persondata.mapIt(it.id)
+
+  test "not_exists":
+    let missingAuthor = personcount + postcount
+    let res = query:
+      select person(id)
+      where not exists(select post(id) where author == ?missingAuthor)
+    check res.sortedByIt(it) == persondata.mapIt(it.id)
+
+  test "with_cte":
+    let res = query:
+      with recent(select post(id, author) where id <= 3)
+      select recent(author)
+      orderby id
+    check res == postdata.filterIt(it.id <= 3).sortedByIt(it.id).mapIt(it.author)
+
+  test "with_cte_chain":
+    let res = query:
+      with recent(select post(id, author) where id <= 3)
+      with authors(select recent(author))
+      select authors(author)
+    check res.sortedByIt(it) == postdata.filterIt(it.id <= 3).mapIt(it.author).sortedByIt(it)
+
+  test "with_cte_subquery":
+    let res = query:
+      with recent(select post(id, author) where id <= 3)
+      select person(id)
+      where id in (select recent(author))
+    check res.sortedByIt(it) == postdata.filterIt(it.id <= 3).mapIt(it.author).deduplicate().sortedByIt(it)
+
+  test "union":
+    var res = query:
+      select person(id) where id <= 2
+      union
+      select person(id) where id >= 4
+    res.sort()
+    check res == @[1, 2, 4, 5]
+
+    res = query:
+      union(
+        select person(id) where id <= 2,
+        select person(id) where id >= 4
+      )
+    res.sort()
+    check res == @[1, 2, 4, 5]
+
+  test "intersect":
+    var res = query:
+      select person(id) where id <= 3
+      intersect
+      select person(id) where id >= 2
+    res.sort()
+    check res == @[2, 3]
+
+    res = query:
+      intersect(
+        select person(id) where id <= 3,
+        select person(id) where id >= 2
+      )
+    res.sort()
+    check res == @[2, 3]
+
+  test "except":
+    var res = query:
+      select person(id) where id <= 4
+      `except`
+      select person(id) where id in {2, 3}
+    res.sort()
+    check res == @[1, 4]
+
+    res = query:
+      `except`(
+        select person(id) where id <= 4,
+        select person(id) where id in {2, 3}
+      )
+    res.sort()
+    check res == @[1, 4]
       
   test "complex_query_subquery_having":
     let
@@ -439,6 +619,24 @@ suite "query":
     let res = query:
       select post(author)
       join person(name) on author == id
+      where id == ?postid
+    let (author, name) = res[0]
+    check name == persondata[author - 1].name
+
+  test "leftjoin_on":
+    let postid = 1
+    let res = query:
+      select post(author)
+      leftjoin person(name) on author == id
+      where id == ?postid
+    let (author, name) = res[0]
+    check name == persondata[author - 1].name
+
+  test "leftouterjoin_on":
+    let postid = 1
+    let res = query:
+      select post(author)
+      leftouterjoin person(name) on author == id
       where id == ?postid
     let (author, name) = res[0]
     check name == persondata[author - 1].name
@@ -622,4 +820,3 @@ suite "query":
     check rows[1].id == 6 
     check rows[1].views == 77
     check rows[1].name == ""
-

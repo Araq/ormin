@@ -66,6 +66,33 @@ suite "query":
   db.dropTable(sqlFilePath)
   db.createTable(sqlFilePath)
 
+  static:
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        crossjoin person(name)
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        rightjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        rightouterjoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        fulljoin person(name) on author == id
+    )
+    doAssert compiles(block:
+      discard query:
+        select post(author)
+        fullouterjoin person(name) on author == id
+    )
+
   # prepare data to insert  
   for i in 1..personcount:
     persondata.add((id: i,
@@ -534,6 +561,15 @@ suite "query":
     let res = query:
       select post(author)
       join person(name) on author == id
+      where id == ?postid
+    let (author, name) = res[0]
+    check name == persondata[author - 1].name
+
+  test "leftjoin_on":
+    let postid = 1
+    let res = query:
+      select post(author)
+      leftjoin person(name) on author == id
       where id == ?postid
     let (author, name) = res[0]
     check name == persondata[author - 1].name

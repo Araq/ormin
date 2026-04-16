@@ -22,14 +22,14 @@ type
     arity: int # -1 for 'varargs'
     typ: DbTypeKind # if dbUnknown, use type of the last argument
 
-  CteColumn = object
+  SourceColumn = object
     name: string
     typ: DbType
 
   CteDef = object
     name: string
     sql: string
-    cols: seq[CteColumn]
+    cols: seq[SourceColumn]
 
 var
   functions {.compileTime.} = @[
@@ -211,13 +211,13 @@ proc sourceName(q: QueryBuilder; source: int): string {.compileTime.} =
   else:
     result = tableNames[source]
 
-proc sourceColumns(q: QueryBuilder; source: int): seq[CteColumn] {.compileTime.} =
+proc sourceColumns(q: QueryBuilder; source: int): seq[SourceColumn] {.compileTime.} =
   if isCteEnvIndex(source):
     result = q.ctes[fromCteEnvIndex(source)].cols
   else:
     for a in attributes:
       if a.tabIndex == source:
-        result.add CteColumn(name: a.name, typ: DbType(kind: a.typ))
+        result.add SourceColumn(name: a.name, typ: DbType(kind: a.typ))
 
 proc sourceLookup(q: QueryBuilder; table: string): int {.compileTime.} =
   for i, t in tableNames:
@@ -227,6 +227,32 @@ proc sourceLookup(q: QueryBuilder; table: string): int {.compileTime.} =
   if cteIdx >= 0:
     return cteEnvIndex(cteIdx)
   result = -1
+
+proc sourceAlias(q: QueryBuilder; source: int; sourceName: string): string {.compileTime.} =
+  if q.kind == qkJoin and q.env.len > 0 and q.env[^1][0] == source:
+    return q.env[^1][1]
+  if isCteEnvIndex(source):
+    result = sourceName.toLowerAscii() & $q.aliasGen
+    inc q.aliasGen
+  else:
+    result = q.getAlias(source)
+
+proc joinKeyword(kind: string): string {.compileTime.} =
+  case kind.toLowerAscii()
+  of "join", "innerjoin":
+    "inner join "
+  of "outerjoin":
+    "outer join "
+  of "leftjoin", "leftouterjoin":
+    "left outer join "
+  of "rightjoin", "rightouterjoin":
+    "right outer join "
+  of "fulljoin", "fullouterjoin":
+    "full outer join "
+  of "crossjoin":
+    "cross join "
+  else:
+    ""
 
 proc lookup(table, attr: string; qb: QueryBuilder; alias: var string): DbType =
   var found = false
@@ -327,8 +353,9 @@ proc nodeName(n: NimNode): string {.compileTime.} =
 proc isQueryClause(name: string): bool {.compileTime.} =
   case name.toLowerAscii()
   of "with", "select", "distinct", "insert", "update", "replace", "delete",
-      "where", "join", "innerjoin", "outerjoin", "groupby", "orderby",
-      "having", "limit", "offset", "returning", "produce":
+      "where", "join", "innerjoin", "outerjoin", "leftjoin", "leftouterjoin",
+      "rightjoin", "rightouterjoin", "fulljoin", "fullouterjoin", "crossjoin",
+      "groupby", "orderby", "having", "limit", "offset", "returning", "produce":
     result = true
   else:
     result = false
@@ -818,15 +845,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
     if tabIndex < 0:
       macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       return
-    let alias =
-      if q.kind == qkJoin and q.env.len > 0 and q.env[^1][0] == tabIndex:
-        q.env[^1][1]
-      elif isCteEnvIndex(tabIndex):
-        let a = tab.toLowerAscii() & $q.aliasGen
-        inc q.aliasGen
-        a
-      else:
-        q.getAlias(tabIndex)
+    let alias = sourceAlias(q, tabIndex, tab)
     if q.kind == qkSelect:
       escIdent(q.fromm, tab)
       q.fromm.add " as " & alias
@@ -950,14 +969,14 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     q.aliasGen = subq.aliasGen
     for p in subq.params:
       q.params.add p
-    var cols: seq[CteColumn] = @[]
+    var cols: seq[SourceColumn] = @[]
     for i, name in subq.retNames:
       let typNode =
         if i < subq.retType.len and subq.retType[i].kind == nnkIdentDefs and subq.retType[i].len > 1:
           subq.retType[i][1]
         else:
           newEmptyNode()
-      cols.add CteColumn(name: name, typ: DbType(kind: typeNodeToDbKind(typNode)))
+      cols.add SourceColumn(name: name, typ: DbType(kind: typeNodeToDbKind(typNode)))
     q.ctes.add CteDef(name: cteName, sql: queryAsString(subq, n[1][1]), cols: cols)
   of "select":
     q.kind = qkSelect
@@ -998,11 +1017,14 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     expectLen n, 2
     let t = cond(n[1], q.where, q.params, DbType(kind: dbBool), q)
     checkBool(t, n)
-  of "join", "innerjoin", "outerjoin":
-    if kind == "outerjoin": q.join.add "\Louter join "
-    else: q.join.add "\Linner join "
+  of "join", "innerjoin", "outerjoin", "leftjoin", "leftouterjoin",
+      "rightjoin", "rightouterjoin", "fulljoin", "fullouterjoin", "crossjoin":
+    q.join.add "\L" & joinKeyword(kind)
     expectLen n, 2
     let cmd = n[1]
+    if kind == "crossjoin" and cmd.kind == nnkCommand and cmd.len == 2 and
+       cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on":
+      macros.error "crossjoin does not support an on clause", n
     if cmd.kind == nnkCommand and cmd.len == 2 and
        cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on" and
        cmd[0].kind == nnkCall:
@@ -1012,8 +1034,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
       else:
         escIdent(q.join, tab)
-        let alias = if isCteEnvIndex(tabIndex): tab.toLowerAscii() & $q.aliasGen else: q.getAlias(tabIndex)
-        if isCteEnvIndex(tabIndex): inc q.aliasGen
+        let alias = sourceAlias(q, tabIndex, tab)
         q.join.add " as " & alias
         var oldEnv = q.env
         q.env = @[(tabIndex, alias)]
@@ -1028,24 +1049,34 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         swap q.env, oldEnv
         checkBool(t, onn)
     elif cmd.kind == nnkCall:
-      # auto join:
       let tab = $cmd[0]
       let tabIndex = sourceLookup(q, tab)
       if tabIndex < 0:
         macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
       else:
-        if isCteEnvIndex(tabIndex) or isCteEnvIndex(q.env[^1][0]):
-          macros.error "automatic joins are only supported for base tables", n
-        let alias = q.getAlias(tabIndex)
-        escIdent(q.join, tab)
-        q.join.add " as " & alias
-        if not autoJoin(q.join, q.env[^1], tabIndex, alias):
-          macros.error "cannot compute auto join from: " & tableNames[q.env[^1][0]] & " to: " & tab, n
-        var oldEnv = q.env
-        q.env = @[(tabIndex, alias)]
-        q.kind = qkJoin
-        tableSel(n[1], q)
-        swap q.env, oldEnv
+        if kind == "crossjoin":
+          let alias = sourceAlias(q, tabIndex, tab)
+          escIdent(q.join, tab)
+          q.join.add " as " & alias
+          var oldEnv = q.env
+          q.env = @[(tabIndex, alias)]
+          q.kind = qkJoin
+          tableSel(n[1], q)
+          swap q.env, oldEnv
+        else:
+          # auto join:
+          if isCteEnvIndex(tabIndex) or isCteEnvIndex(q.env[^1][0]):
+            macros.error "automatic joins are only supported for base tables", n
+          let alias = q.getAlias(tabIndex)
+          escIdent(q.join, tab)
+          q.join.add " as " & alias
+          if not autoJoin(q.join, q.env[^1], tabIndex, alias):
+            macros.error "cannot compute auto join from: " & tableNames[q.env[^1][0]] & " to: " & tab, n
+          var oldEnv = q.env
+          q.env = @[(tabIndex, alias)]
+          q.kind = qkJoin
+          tableSel(n[1], q)
+          swap q.env, oldEnv
     else:
       macros.error "unknown query component " & repr(n), n
   of "groupby":

@@ -72,7 +72,7 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 
 ## Query DSL
 
-`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, `join`, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
+`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
 
 Example snippets:
 
@@ -91,7 +91,7 @@ query:
 # Explicit join with filter
 let rows = query:
   select Post(author)
-  join Person(name) on author == id
+  leftjoin Person(name) on author == id
   where id == ?postId
 
 # Automatic join generated from foreign keys
@@ -149,7 +149,7 @@ Compile with `-d:debugOrminSql` to see the produced SQL at build time, which hel
 
 Selecting columns for the primary table is done using the syntax `select Post(title, author, ...)` where `Post` is the table and `title`, `author`, etc are columns of that table. This will return a tuple containing `(title, author, ...)`. Only one table can be selected and columns must be from that table. Unlike in SQL, columns for joined tables are selected directly in the `join` syntax.
 
-Joins use the syntax `join Person(name, city) on author == id` where `Person` is the table and the columns `name`, and `city` are columns of that table. Often the join condition can be inferred from foreign keys and can be left out: `join Author(name, city)`. The columns listed in the joined tabled will be appended to the results tuple, i.e. `(title, author, name, city)`. Supported joins are: `join`, `innerjoin`, `outerjoin`.
+Joins use the syntax `join Person(name, city) on author == id` where `Person` is the table and the columns `name`, and `city` are columns of that table. Often the join condition can be inferred from foreign keys and can be left out: `join Author(name, city)`. The columns listed in the joined tabled will be appended to the results tuple, i.e. `(title, author, name, city)`. Supported joins are: `join`, `innerjoin`, `leftjoin`, `leftouterjoin`, `rightjoin`, `rightouterjoin`, `fulljoin`, `fullouterjoin`, `crossjoin`, and the legacy `outerjoin`. Runtime support for `rightjoin` / `fulljoin` still depends on the SQL backend.
 
 The join syntax differs from SQL but simplifies selecting fields from multiple tables by making them more explicit while still maintaing SQL's full query capabilities.
 

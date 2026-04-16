@@ -72,7 +72,7 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 
 ## Query DSL
 
-`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
+`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, window expressions, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
 
 Example snippets:
 
@@ -120,6 +120,10 @@ let peopleWithPosts = query:
 let recentAuthors = query:
   with recent(select Post(id, author) where id <= 3)
   select recent(author)
+
+# Window functions use over(expr, ...)
+let rankedPosts = query:
+  select Post(author, id, over(row_number(), partitionby(author), orderby(id)) as rn)
 
 # Set operations can be written inline between select queries
 let mergedIds = query:

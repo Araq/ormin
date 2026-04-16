@@ -39,6 +39,12 @@ var
     Function(name: "max", arity: 1, typ: dbUnknown),
     Function(name: "avg", arity: 1, typ: dbFloat),
     Function(name: "sum", arity: 1, typ: dbUnknown),
+    Function(name: "row_number", arity: 0, typ: dbInt),
+    Function(name: "rank", arity: 0, typ: dbInt),
+    Function(name: "dense_rank", arity: 0, typ: dbInt),
+    Function(name: "percent_rank", arity: 0, typ: dbFloat),
+    Function(name: "cume_dist", arity: 0, typ: dbFloat),
+    Function(name: "ntile", arity: 1, typ: dbInt),
     Function(name: "isnull", arity: 3, typ: dbUnknown),
     Function(name: "concat", arity: -1, typ: dbVarchar),
     Function(name: "abs", arity: 1, typ: dbUnknown),
@@ -436,6 +442,25 @@ proc queryAsString(q: QueryBuilder, n: NimNode): string
 proc applyQueryNode(n: NimNode; q: QueryBuilder)
 proc renderInlineQuery(n: NimNode; params: var Params;
                        qb: QueryBuilder): tuple[sql: string, typ: DbType]
+proc cond(n: NimNode; q: var string; params: var Params;
+          expected: DbType, qb: QueryBuilder): DbType
+
+proc renderWindowClause(n: NimNode; q: var string; params: var Params;
+                        qb: QueryBuilder) {.compileTime.} =
+  let op = nodeName(n[0]).toLowerAscii()
+  case op
+  of "partitionby":
+    q.add "partition by "
+    for i in 1..<n.len:
+      discard cond(n[i], q, params, DbType(kind: dbUnknown), qb)
+      if i < n.len - 1: q.add ", "
+  of "orderby":
+    q.add "order by "
+    for i in 1..<n.len:
+      discard cond(n[i], q, params, DbType(kind: dbUnknown), qb)
+      if i < n.len - 1: q.add ", "
+  else:
+    macros.error "unsupported window clause: " & op, n
 
 proc lookupColumnInEnv(n: NimNode; q: var string; params: var Params;
                       expected: DbType, qb: QueryBuilder): DbType =
@@ -636,6 +661,18 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let subq = renderInlineQuery(n, params, qb)
       q.add subq.sql
       result = subq.typ
+      return
+    if op == "over":
+      if n.len < 2:
+        macros.error "over requires at least one expression", n
+      result = cond(n[1], q, params, expected, qb)
+      q.add " over ("
+      for i in 2..<n.len:
+        if i > 2: q.add " "
+        if n[i].kind notin nnkCallKinds:
+          macros.error "window clauses must be calls like partitionby(...) or orderby(...)", n[i]
+        renderWindowClause(n[i], q, params, qb)
+      q.add ")"
       return
     if op == "exists":
       expectLen n, 2

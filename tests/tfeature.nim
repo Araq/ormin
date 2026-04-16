@@ -279,6 +279,28 @@ suite "query":
       select post(count(distinct author))
     check res == @[postdata.mapIt(it.author).deduplicate().len]
 
+  test "window_row_number":
+    let res = query:
+      select post(author, id, over(row_number(), partitionby(author), orderby(id)) as rn)
+      orderby author, id
+    var expected: seq[(int, int, int)] = @[]
+    var counters = initCountTable[int]()
+    for p in postdata.sortedByIt((it.author, it.id)):
+      counters.inc(p.author)
+      expected.add((p.author, p.id, counters[p.author]))
+    check res == expected
+
+  test "window_running_sum":
+    let res = query:
+      select post(author, id, over(sum(id), partitionby(author), orderby(id)) as running)
+      orderby author, id
+    var expected: seq[(int, int, int)] = @[]
+    var sums = initTable[int, int]()
+    for p in postdata.sortedByIt((it.author, it.id)):
+      sums[p.author] = sums.getOrDefault(p.author) + p.id
+      expected.add((p.author, p.id, sums[p.author]))
+    check res == expected
+
   test "limit":
     let id = 1
     let res = query:

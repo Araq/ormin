@@ -427,6 +427,27 @@ suite "query":
       where not exists(select post(id) where author == ?missingAuthor)
     check res.sortedByIt(it) == persondata.mapIt(it.id)
 
+  test "with_cte":
+    let res = query:
+      with recent(select post(id, author) where id <= 3)
+      select recent(author)
+      orderby id
+    check res == postdata.filterIt(it.id <= 3).sortedByIt(it.id).mapIt(it.author)
+
+  test "with_cte_chain":
+    let res = query:
+      with recent(select post(id, author) where id <= 3)
+      with authors(select recent(author))
+      select authors(author)
+    check res.sortedByIt(it) == postdata.filterIt(it.id <= 3).mapIt(it.author).sortedByIt(it)
+
+  test "with_cte_subquery":
+    let res = query:
+      with recent(select post(id, author) where id <= 3)
+      select person(id)
+      where id in (select recent(author))
+    check res.sortedByIt(it) == postdata.filterIt(it.id <= 3).mapIt(it.author).deduplicate().sortedByIt(it)
+
   test "union":
     var res = query:
       select person(id) where id <= 2

@@ -16,6 +16,8 @@ task test, "Run all test suite":
 
   exec "nim c -f -r tests/tfeature"
   exec "nim c -f -r tests/tcommon"
+  exec "nim c -f -r tests/tfloatnull"
+  exec "nim c -f -d:ormin.sqliteNullFloatAsNaN -r tests/tfloatnull"
   exec "nim c -f -r tests/tsqlite"
   exec "nim c -f -r tests/tdb_utils"
   exec "nim c -f -r tests/timportstatic"

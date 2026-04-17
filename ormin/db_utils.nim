@@ -90,7 +90,8 @@ proc quoteDbIdentifier*(name: string): DbId =
 proc dropTableName(db: DbConn; tableName, lookupName: string) =
   # SQL parameters bind values, not identifiers, so DROP TABLE needs the
   # identifier rendered into the statement text with correct quoting.
-  when defined(sqlite) and defined(orminLegacySqliteDropNames):
+  when defined(sqlite) and
+      (defined(orminLegacySqliteDropNames) or defined(ormin.sqliteLegacyDropNames)):
     db.exec(sql("drop table if exists " & lookupName))
   else:
     let tableIdentSql = quoteDbIdentifier(tableName)

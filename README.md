@@ -59,7 +59,16 @@ importModel(DbBackend.sqlite, "model_sqlite")
 let db {.global.} = open(":memory:", "", "", "")
 ```
 
-Note: Ormin now properly handles quoted table names in `dropTable`. The compile flag `-d:orminLegacySqliteDropNames` restores that older drop-table behavior by using the normalized lookup name instead of the preserved SQL identifier. The old behavior only worked in SQlite, not Postgres.
+SQLite float null handling is controlled by compile flag:
+
+```nim
+importModel(DbBackend.sqlite, "model_sqlite")
+```
+
+Use compile flag `-d:ormin.sqliteNullFloatAsNaN` to opt in to mapping SQLite `NULL` float values to `NaN`.
+Without the flag, nullable float reads keep the legacy behavior (`NULL` reads as `0.0`).
+
+Note: Ormin now properly handles quoted table names in `dropTable`. The compile flag `-d:ormin.sqliteLegacyDropNames` restores that older drop-table behavior by using the normalized lookup name instead of the preserved SQL identifier. The old behavior only worked in SQlite, not Postgres.
 
 ### PostgreSQL
 

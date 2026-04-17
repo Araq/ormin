@@ -11,6 +11,11 @@ create table if not exists tb_float(
   typfloat real not null
 );
 
+create table if not exists tb_nullable_float(
+  id integer primary key,
+  typfloat real null
+);
+
 create table if not exists tb_string(
   typstring text not null
 );

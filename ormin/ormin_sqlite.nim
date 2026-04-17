@@ -1,7 +1,7 @@
 
 {.deadCodeElim: on.}
 
-import json, times
+import json, times, math, options
 
 import db_connector/db_common
 import db_connector/sqlite3
@@ -53,8 +53,17 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
     if bind_text(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
       dbError(db)
   elif t is float64:
-    if bind_double(s, idx.cint, x) != SQLITE_OK:
-      dbError(db)
+    let xf = x
+    when xf is Option[SomeFloat]:
+      if xf.isSome:
+        if bind_double(s, idx.cint, xf.get.float64) != SQLITE_OK:
+          dbError(db)
+      else:
+        if bind_null(s, idx.cint) != SQLITE_OK:
+          dbError(db)
+    else:
+      if bind_double(s, idx.cint, xf) != SQLITE_OK:
+        dbError(db)
   elif t is DateTime:
     let xx = if x.nanosecond > 0:
       x.utc().format("yyyy-MM-dd HH:mm:ss\'.\'fff")
@@ -161,7 +170,13 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var blobType;
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
-  dest = column_double(s, idx.cint)
+  when defined(orminSqliteNullFloatAsNaN) or defined(ormin.sqliteNullFloatAsNaN):
+    if column_type(s, idx.cint) == SQLITE_NULL:
+      dest = NaN
+    else:
+      dest = column_double(s, idx.cint)
+  else:
+    dest = column_double(s, idx.cint)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: bool;
                      t: typedesc; name: string) =

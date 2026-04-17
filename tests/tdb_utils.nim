@@ -3,7 +3,9 @@ import db_connector/db_common
 from db_connector/db_sqlite import open, exec, getValue
 import ormin/db_utils
 
-const usesLegacySqliteDropNames = defined(sqlite) and defined(orminLegacySqliteDropNames)
+const usesLegacySqliteDropNames =
+  defined(sqlite) and
+  (defined(orminLegacySqliteDropNames) or defined(ormin.sqliteLegacyDropNames))
 
 let
   db {.global.} = open(":memory:", "", "", "")

@@ -1106,7 +1106,17 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       if q.onConflictWhereSet:
         macros.error "conflict update 'where' can only be specified once", n
       var conflictWhere = ""
+      # In PostgreSQL upsert WHERE, bare column names are ambiguous between
+      # target table and EXCLUDED. Resolve bare identifiers against target table.
+      let oldKind = q.kind
+      let oldEnv = q.env
+      if q.env.len > 0:
+        let source = q.env[^1][0]
+        q.kind = qkSelect
+        q.env = @[(source, sourceName(q, source))]
       let t = cond(n[1], conflictWhere, q.params, DbType(kind: dbBool), q)
+      q.kind = oldKind
+      q.env = oldEnv
       checkBool(t, n)
       q.onConflictWhere = " where " & conflictWhere
       q.onConflictWhereSet = true

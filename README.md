@@ -61,10 +61,6 @@ let db {.global.} = open(":memory:", "", "", "")
 
 SQLite float null handling is controlled by compile flag:
 
-```nim
-importModel(DbBackend.sqlite, "model_sqlite")
-```
-
 Use compile flag `-d:ormin.sqliteNullFloatAsNaN` to opt in to mapping SQLite `NULL` float values to `NaN`.
 Without the flag, nullable float reads keep the legacy behavior (`NULL` reads as `0.0`).
 

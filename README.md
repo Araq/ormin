@@ -72,7 +72,7 @@ let db {.global.} = open("localhost", "user", "password", "dbname")
 
 ## Query DSL
 
-`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, window expressions, `union`/`intersect`/`except` and `returning` are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
+`query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, window expressions, `union`/`intersect`/`except`, `returning`, and insert upserts via `onconflict` + (`donothing` or `doupdate`) are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.
 
 Example snippets:
 
@@ -87,6 +87,27 @@ let recentMessages = query:
 let payload = %*{"dt2": %*"2023-10-01T00:00:00Z"}
 query:
   insert tb_timestamp(dt1 = ?dt1, dt2 = %payload["dt2"])
+
+# Upsert on conflict (SQLite/PostgreSQL)
+query:
+  insert tb_nullable(id = ?id, note = ?note)
+  onconflict(id)
+  doupdate(note = ?note)
+
+# Conditional upsert update
+query:
+  insert tb_nullable(id = ?id, note = ?note)
+  onconflict(id)
+  doupdate(note = ?note)
+  where note != ?note
+
+# Ignore duplicates
+query:
+  insert tb_nullable(id = ?id, note = ?note)
+  onconflict(id)
+  donothing()
+
+# Note: plain INSERT ... VALUES does not support `where`; use `onconflict(...)+doupdate(...)+where ...`
 
 # Explicit join with filter
 let rows = query:

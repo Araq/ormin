@@ -143,7 +143,7 @@ type
     qkInsertReturning
   QueryBuilder = ref object
     head, fromm, join, values, where, groupby, having, orderby: string
-    limit, offset, returning: string
+    limit, offset, returning, onConflict, onConflictWhere: string
     env: Env
     ctes: seq[CteDef]
     cteBase: int
@@ -158,6 +158,7 @@ type
     insertedValues: seq[(string, NimNode)]
     # For SQLite: expression to return instead of last_insert_rowid()
     retExpr: NimNode
+    onConflictTargetSet, onConflictActionSet, onConflictIsDoUpdate, onConflictWhereSet: bool
 
 # Execute a non-row SQL statement strictly (errors on failure)
 template execNoRowsStrict*(sqlStmt: string) =
@@ -183,12 +184,14 @@ template execNoRowsLoose(sqlStmt: string) =
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
     groupby: "", having: "", orderby: "", limit: "", offset: "",
-    returning: "",
+    returning: "", onConflict: "", onConflictWhere: "",
     env: @[], ctes: @[], cteBase: 0, kind: qkNone, params: @[],
     retType: newNimNode(nnkTupleTy), singleRow: false,
     retTypeIsJson: false, retNames: @[],
     coln: 0, qmark: 0, aliasGen: 1, colAliases: @[],
-    insertedValues: @[], retExpr: newEmptyNode())
+    insertedValues: @[], retExpr: newEmptyNode(),
+    onConflictTargetSet: false, onConflictActionSet: false,
+    onConflictIsDoUpdate: false, onConflictWhereSet: false)
 
 proc getAlias(q: QueryBuilder; tabIndex: int): string =
   result = tableNames[tabIndex][0] & $q.aliasGen
@@ -361,7 +364,8 @@ proc isQueryClause(name: string): bool {.compileTime.} =
   of "with", "select", "distinct", "insert", "update", "replace", "delete",
       "where", "join", "innerjoin", "outerjoin", "leftjoin", "leftouterjoin",
       "rightjoin", "rightouterjoin", "fulljoin", "fullouterjoin", "crossjoin",
-      "groupby", "orderby", "having", "limit", "offset", "returning", "produce":
+      "groupby", "orderby", "having", "limit", "offset", "returning", "produce",
+      "onconflict", "donothing", "doupdate":
     result = true
   else:
     result = false
@@ -1019,8 +1023,14 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
 
 
 proc queryh(n: NimNode; q: QueryBuilder) =
+  var n = n
+  if n.kind == nnkCall:
+    let c = newNimNode(nnkCommand)
+    for i in 0..<n.len:
+      c.add n[i]
+    n = c
   expectKind n, nnkCommand
-  let kind = nodeName(n[0])
+  let kind = nodeName(n[0]).toLowerAscii()
   case kind
   of "with":
     expectLen n, 2
@@ -1090,20 +1100,41 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     tableSel(n[1], q)
   of "where":
     expectLen n, 2
-    let t = cond(n[1], q.where, q.params, DbType(kind: dbBool), q)
-    checkBool(t, n)
+    if q.kind in {qkInsert, qkInsertReturning}:
+      if not q.onConflictTargetSet or not q.onConflictActionSet or not q.onConflictIsDoUpdate:
+        macros.error "'where' for insert is only supported after 'onconflict(...)' and 'doupdate(...)'", n
+      if q.onConflictWhereSet:
+        macros.error "conflict update 'where' can only be specified once", n
+      var conflictWhere = ""
+      # In PostgreSQL upsert WHERE, bare column names are ambiguous between
+      # target table and EXCLUDED. Resolve bare identifiers against target table.
+      let oldKind = q.kind
+      let oldEnv = q.env
+      if q.env.len > 0:
+        let source = q.env[^1][0]
+        q.kind = qkSelect
+        q.env = @[(source, sourceName(q, source))]
+      let t = cond(n[1], conflictWhere, q.params, DbType(kind: dbBool), q)
+      q.kind = oldKind
+      q.env = oldEnv
+      checkBool(t, n)
+      q.onConflictWhere = " where " & conflictWhere
+      q.onConflictWhereSet = true
+    else:
+      let t = cond(n[1], q.where, q.params, DbType(kind: dbBool), q)
+      checkBool(t, n)
   of "join", "innerjoin", "outerjoin", "leftjoin", "leftouterjoin",
       "rightjoin", "rightouterjoin", "fulljoin", "fullouterjoin", "crossjoin":
     q.join.add "\L" & joinKeyword(kind)
     expectLen n, 2
-    let cmd = n[1]
-    if kind == "crossjoin" and cmd.kind == nnkCommand and cmd.len == 2 and
-       cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on":
+    let joinClause = n[1]
+    if kind == "crossjoin" and joinClause.kind == nnkCommand and joinClause.len == 2 and
+       joinClause[1].kind == nnkCommand and joinClause[1].len == 2 and $joinClause[1][0] == "on":
       macros.error "crossjoin does not support an on clause", n
-    if cmd.kind == nnkCommand and cmd.len == 2 and
-       cmd[1].kind == nnkCommand and cmd[1].len == 2 and $cmd[1][0] == "on" and
-       cmd[0].kind == nnkCall:
-      let tab = $cmd[0][0]
+    if joinClause.kind == nnkCommand and joinClause.len == 2 and
+       joinClause[1].kind == nnkCommand and joinClause[1].len == 2 and $joinClause[1][0] == "on" and
+       joinClause[0].kind == nnkCall:
+      let tab = $joinClause[0][0]
       let tabIndex = sourceLookup(q, tab)
       if tabIndex < 0:
         macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
@@ -1114,17 +1145,17 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         var oldEnv = q.env
         q.env = @[(tabIndex, alias)]
         q.kind = qkJoin
-        tableSel(cmd[0], q)
+        tableSel(joinClause[0], q)
         swap q.env, oldEnv
-        let onn = cmd[1][1]
+        let onn = joinClause[1][1]
         q.join.add " on "
         oldEnv = q.env
         q.env.add((tabIndex, alias))
         let t = cond(onn, q.join, q.params, DbType(kind: dbBool), q)
         swap q.env, oldEnv
         checkBool(t, onn)
-    elif cmd.kind == nnkCall:
-      let tab = $cmd[0]
+    elif joinClause.kind == nnkCall:
+      let tab = $joinClause[0]
       let tabIndex = sourceLookup(q, tab)
       if tabIndex < 0:
         macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]
@@ -1175,6 +1206,64 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     expectLen n, 2
     let t = cond(n[1], q.offset, q.params, DbType(kind: dbInt), q)
     checkInt(t, n[1])
+  of "onconflict":
+    if q.kind notin {qkInsert, qkInsertReturning}:
+      macros.error "'onconflict' only possible within 'insert'", n
+    if q.onConflictTargetSet:
+      macros.error "'onconflict' can only be specified once", n
+    if n.len < 2:
+      macros.error "'onconflict' expects one or more columns", n
+    q.onConflict = "\Lon conflict ("
+    for i in 1..<n.len:
+      let col = n[i]
+      let colname = nodeName(col)
+      if colname.len == 0:
+        macros.error "'onconflict' columns must be identifiers", col
+      if lookup("", colname, q).kind == dbUnknown:
+        macros.error "unknown column name: " & colname, col
+      if i > 1:
+        q.onConflict.add ", "
+      escIdent(q.onConflict, colname)
+    q.onConflict.add ")"
+    q.onConflictTargetSet = true
+  of "donothing":
+    if q.kind notin {qkInsert, qkInsertReturning}:
+      macros.error "'donothing' only possible within 'insert'", n
+    if not q.onConflictTargetSet:
+      macros.error "'donothing' requires a preceding 'onconflict' clause", n
+    if q.onConflictActionSet:
+      macros.error "conflict action already set; choose only one of 'donothing' or 'doupdate'", n
+    expectLen n, 1
+    q.onConflict.add " do nothing"
+    q.onConflictActionSet = true
+    q.onConflictIsDoUpdate = false
+  of "doupdate":
+    if q.kind notin {qkInsert, qkInsertReturning}:
+      macros.error "'doupdate' only possible within 'insert'", n
+    if not q.onConflictTargetSet:
+      macros.error "'doupdate' requires a preceding 'onconflict' clause", n
+    if q.onConflictActionSet:
+      macros.error "conflict action already set; choose only one of 'donothing' or 'doupdate'", n
+    if n.len < 2:
+      macros.error "'doupdate' expects assignments like doupdate(col = value)", n
+    q.onConflict.add " do update set "
+    for i in 1..<n.len:
+      let assignment = n[i]
+      if assignment.kind != nnkExprEqExpr:
+        macros.error "'doupdate' expects assignments like doupdate(col = value)", assignment
+      let colname = nodeName(assignment[0])
+      if colname.len == 0:
+        macros.error "'doupdate' assignments must target a column identifier", assignment[0]
+      let coltype = lookup("", colname, q)
+      if coltype.kind == dbUnknown:
+        macros.error "unknown column name: " & colname, assignment[0]
+      if i > 1:
+        q.onConflict.add ", "
+      escIdent(q.onConflict, colname)
+      q.onConflict.add " = "
+      discard cond(assignment[1], q.onConflict, q.params, coltype, q)
+    q.onConflictActionSet = true
+    q.onConflictIsDoUpdate = true
   of "returning":
     if q.kind != qkInsert:
       macros.error "'returning' only possible within 'insert'"
@@ -1217,6 +1306,10 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     macros.error "unknown query component " & repr(n), n
 
 proc queryAsString(q: QueryBuilder, n: NimNode): string =
+  if q.onConflictTargetSet and not q.onConflictActionSet:
+    macros.error "'onconflict' requires either 'donothing' or 'doupdate'", n
+  if q.onConflictWhereSet and not q.onConflictIsDoUpdate:
+    macros.error "conflict update 'where' requires 'doupdate(...)'", n
   if q.cteBase < q.ctes.len:
     result.add "with "
     for i in q.cteBase..<q.ctes.len:
@@ -1237,9 +1330,16 @@ proc queryAsString(q: QueryBuilder, n: NimNode): string =
     result.add "\Lvalues ("
     result.add q.values
     result.add ")"
+  if q.onConflict.len > 0:
+    result.add q.onConflict
+  if q.onConflictWhere.len > 0:
+    result.add q.onConflictWhere
   if q.where.len > 0:
-    result.add "\Lwhere "
-    result.add q.where
+    if q.kind in {qkSelect, qkJoin, qkUpdate, qkDelete}:
+      result.add "\Lwhere "
+      result.add q.where
+    else:
+      macros.error "'where' is not supported for this query kind", n
   if q.groupby.len > 0:
     result.add "\Lgroup by "
     result.add q.groupby
@@ -1353,7 +1453,7 @@ proc applyQueryNode(n: NimNode; q: QueryBuilder) =
           macros.error "mixed infix set operations are not supported; use nesting for precedence", part
         flushBranch(part)
       else:
-        if part.kind == nnkCommand or isSetOpCall(part):
+        if part.kind in {nnkCommand, nnkCall} or isSetOpCall(part):
           currentBranch.add part
         else:
           macros.error "illformed query", part
@@ -1368,7 +1468,7 @@ proc applyQueryNode(n: NimNode; q: QueryBuilder) =
   for part in flattened:
     if isSetOpCall(part):
       buildSetOpQuery(part, q)
-    elif part.kind == nnkCommand:
+    elif part.kind in {nnkCommand, nnkCall}:
       queryh(part, q)
     else:
       macros.error "illformed query", part

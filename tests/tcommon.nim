@@ -451,3 +451,58 @@ suite "nullable":
       produce json
     check res[0]["note"].kind == JNull
     check res[1]["note"].getStr == "hello"
+
+suite "upsert":
+  setup:
+    db.dropTable(sqlFile, "tb_nullable")
+    db.createTable(sqlFile, "tb_nullable")
+
+  test "onconflict do nothing":
+    let first = "first value"
+    query:
+      insert tb_nullable(id = 1, note = ?first)
+
+    let ignored = "should not overwrite"
+    query:
+      insert tb_nullable(id = 1, note = ?ignored)
+      onconflict(id)
+      donothing()
+
+    let note = db.getValue(sql"select note from tb_nullable where id = 1")
+    check note == first
+
+  test "onconflict do update":
+    let first = "old note"
+    query:
+      insert tb_nullable(id = 2, note = ?first)
+
+    let replacement = "new note"
+    query:
+      insert tb_nullable(id = 2, note = ?replacement)
+      onconflict(id)
+      doupdate(note = ?replacement)
+
+    let note = db.getValue(sql"select note from tb_nullable where id = 2")
+    check note == replacement
+
+  test "onconflict do update where":
+    query:
+      insert tb_nullable(id = 3, note = "keep-me")
+
+    query:
+      insert tb_nullable(id = 3, note = "replace-me")
+      onconflict(id)
+      doupdate(note = "replace-me")
+      where note != "keep-me"
+
+    let note = db.getValue(sql"select note from tb_nullable where id = 3")
+    check note == "keep-me"
+
+static:
+  doAssert not compiles(
+    (block:
+      query:
+        insert tb_nullable(id = 100, note = "x")
+        where id == 100
+    )
+  )

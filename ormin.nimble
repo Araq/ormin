@@ -20,3 +20,5 @@ feature "examples":
 import std/os
 when fileExists("config.nims"):
   include "config.nims"
+requires "msgpack4nim"
+

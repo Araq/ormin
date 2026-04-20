@@ -10,6 +10,7 @@ import db_connector/db_common
 from os import parentDir, `/`
 
 import db_types
+import query_hooks
 
 # SQL dialect specific things:
 const
@@ -1631,126 +1632,93 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   if q.retType.len > 0:
     result.add res
 
-proc fromQueryHook*[T](to: typedesc[T], x: T): T =
-  ## Default conversion hook used by `query(T): ...`.
-  ## Users can overload this proc to customize field/type conversions.
-  x
+proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNode): NimNode =
+  expectKind body, nnkStmtList
+  expectMinLen body, 1
 
-proc nodeFieldName(n: NimNode): string {.compileTime.} =
-  case n.kind
-  of nnkIdent, nnkSym:
-    result = n.strVal
-  of nnkPostfix:
-    if n.len == 2:
-      result = nodeFieldName(n[1])
+  q.retTypeIsJson = false
+  applyQueryNode(body, q)
+  if q.kind notin {qkSelect, qkJoin}:
+    macros.error "query(T) currently supports select/join queries only", body
+  if q.retType.len == 0:
+    macros.error "query(T) requires a query that returns data", body
+  if q.retTypeIsJson:
+    macros.error "query(T) does not support 'produce json'", body
+
+  let sql = queryAsString(q, body)
+  let prepStmt = genSym(nskLet)
+  let res = genSym(nskVar)
+  result = newTree(
+    nnkStmtListExpr,
+    newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
+  )
+  if q.singleRow:
+    result.add newTree(nnkVarSection, newIdentDefs(res, copyNimTree(retType), newEmptyNode()))
+  else:
+    result.add newTree(nnkVarSection, newIdentDefs(res,
+      newTree(nnkBracketExpr, bindSym"seq", copyNimTree(retType)),
+      newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
+
+  let blk = newStmtList()
+  var i = 1
+  if q.params.len > 0:
+    blk.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
+    for p in q.params:
+      let fn = if p.isJson: bindSym"bindParamJson" else: bindSym"bindParam"
+      blk.add newCall(fn, ident"db", prepStmt, newLit(i), p.ex, p.typ)
+      inc i
+  blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
+
+  let row = genSym(nskVar, "dbRow")
+  var action = newStmtList()
+  action.add newTree(nnkVarSection, newIdentDefs(row, ident"DbRow",
+    newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
+  for idx, name in q.retNames:
+    let item = genSym(nskVar, "dbItem")
+    action.add newTree(nnkVarSection, newIdentDefs(item, ident"DbItem", newEmptyNode()))
+    action.add newCall(bindSym"bindResultRaw", ident"db", prepStmt, newLit(idx), item, newLit(name))
+    action.add newCall(bindSym"add", row, item)
+  let mappedExpr = newCall(ident"fromQueryHook", copyNimTree(retType), row)
+  if q.singleRow:
+    action.add newAssignment(res, mappedExpr)
+  else:
+    action.add newCall(bindSym"add", res, mappedExpr)
+
+  template ifStmt2Hook(prepStmt; action) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
+    bind dbError
+    if stepQuery(db, prepStmt, true):
+      action
+      stopQuery(db, prepStmt)
     else:
-      result = ""
+      stopQuery(db, prepStmt)
+      dbError(db)
+
+  template ifStmt1Hook(prepStmt; action) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
+    if stepQuery(db, prepStmt, true):
+      action
+    stopQuery(db, prepStmt)
+
+  template whileStmtHook(prepStmt; action) {.dirty.} =
+    bind stepQuery
+    bind stopQuery
+    while stepQuery(db, prepStmt, true):
+      action
+    stopQuery(db, prepStmt)
+
+  if q.singleRow:
+    if attempt:
+      blk.add getAst(ifStmt1Hook(prepStmt, action))
+    else:
+      blk.add getAst(ifStmt2Hook(prepStmt, action))
   else:
-    result = ""
+    blk.add getAst(whileStmtHook(prepStmt, action))
 
-proc unwrapTypedescNode(n: NimNode): NimNode {.compileTime.} =
-  if n.kind == nnkBracketExpr and n.len == 2 and
-      cmpIgnoreCase(nodeName(n[0]), "typedesc") == 0:
-    result = n[1]
-  else:
-    result = n
-
-proc resolveTypeImplNode(n: NimNode): NimNode {.compileTime.} =
-  var it = n
-  if it.kind notin {nnkTupleTy, nnkObjectTy, nnkRefTy, nnkPtrTy, nnkVarTy, nnkDistinctTy}:
-    it = unwrapTypedescNode(getTypeInst(it))
-    it = getTypeImpl(it)
-  while it.kind in {nnkRefTy, nnkPtrTy, nnkVarTy, nnkDistinctTy}:
-    it = getTypeImpl(it[0])
-  result = it
-
-proc collectFieldNames(n: NimNode; names: var seq[string]) {.compileTime.} =
-  case n.kind
-  of nnkTupleTy:
-    for child in n:
-      if child.kind == nnkIdentDefs:
-        for i in 0 ..< child.len - 2:
-          let name = nodeFieldName(child[i])
-          if name.len > 0:
-            names.add name
-  of nnkObjectTy:
-    if n.len >= 3:
-      collectFieldNames(n[2], names)
-  of nnkRecList:
-    for child in n:
-      collectFieldNames(child, names)
-  of nnkRecCase:
-    for i in 1 ..< n.len:
-      collectFieldNames(n[i], names)
-  of nnkOfBranch, nnkElse:
-    for child in n:
-      collectFieldNames(child, names)
-  of nnkIdentDefs:
-    for i in 0 ..< n.len - 2:
-      let name = nodeFieldName(n[i])
-      if name.len > 0:
-        names.add name
-  else:
-    discard
-
-proc findFieldName(fields: openArray[string]; target: string): string {.compileTime.} =
-  for field in fields:
-    if cmpIgnoreCase(field, target) == 0:
-      return field
-  result = ""
-
-macro mapQueryRowToType(retType: typedesc; row: typed): untyped =
-  let baseType = unwrapTypedescNode(getTypeInst(retType))
-  let rawImpl = getTypeImpl(baseType)
-  let isRefType = rawImpl.kind == nnkRefTy
-  let targetImpl = resolveTypeImplNode(baseType)
-
-  if targetImpl.kind == nnkObjectTy:
-    var targetFieldNames: seq[string] = @[]
-    collectFieldNames(targetImpl, targetFieldNames)
-
-    let rowImpl = resolveTypeImplNode(row.getTypeInst)
-    let mapped = genSym(nskVar, "mapped")
-    result = newStmtList()
-    result.add newTree(nnkVarSection, newIdentDefs(mapped, copyNimTree(retType), newEmptyNode()))
-    if isRefType:
-      result.add newCall(bindSym"new", mapped)
-
-    if rowImpl.kind notin {nnkTupleTy, nnkObjectTy}:
-      if targetFieldNames.len != 1:
-        macros.error("query(T) object mapping requires tuple/object rows unless T has exactly one field, got: " &
-          repr(row.getTypeInst), row)
-      let targetField = targetFieldNames[0]
-      let targetAccess = newTree(nnkDotExpr, mapped, ident(targetField))
-      result.add newAssignment(
-        targetAccess,
-        newCall(ident"fromQueryHook",
-          newCall(bindSym"typeof", copyNimTree(targetAccess)),
-          copyNimTree(row))
-      )
-      result = newTree(nnkStmtListExpr, result, mapped)
-      return
-
-    var rowFieldNames: seq[string] = @[]
-    collectFieldNames(rowImpl, rowFieldNames)
-
-    for targetField in targetFieldNames:
-      let rowField = findFieldName(rowFieldNames, targetField)
-      if rowField.len == 0:
-        macros.error("query(T) cannot map missing field '" & targetField &
-          "' from row type: " & repr(row.getTypeInst), row)
-      let targetAccess = newTree(nnkDotExpr, mapped, ident(targetField))
-      let rowAccess = newTree(nnkDotExpr, copyNimTree(row), ident(rowField))
-      result.add newAssignment(
-        targetAccess,
-        newCall(ident"fromQueryHook",
-          newCall(bindSym"typeof", copyNimTree(targetAccess)),
-          rowAccess)
-      )
-    result = newTree(nnkStmtListExpr, result, mapped)
-    return
-
-  result = newCall(ident"fromQueryHook", copyNimTree(retType), copyNimTree(row))
+  result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
+  result.add res
 
 macro query*(args: varargs[untyped]): untyped =
   if args.len == 1:
@@ -1767,39 +1735,7 @@ macro query*(args: varargs[untyped]): untyped =
   let retType = args[0]
   let body = args[1]
   var q = newQueryBuilder()
-  let baseQuery = queryImpl(q, body, false, false)
-  if q.retType.len == 0:
-    macros.error("query(T) requires a query that returns data", body)
-  if q.retTypeIsJson:
-    macros.error("query(T) does not support 'produce json'", body)
-
-  if q.singleRow:
-    let row = genSym(nskLet, "row")
-    result = newTree(nnkBlockStmt, newEmptyNode(),
-      newStmtList(
-        newLetStmt(row, baseQuery),
-        newCall(bindSym"mapQueryRowToType", copyNimTree(retType), row)
-      )
-    )
-  else:
-    let rows = genSym(nskLet, "rows")
-    let row = genSym(nskForVar, "row")
-    let mapped = genSym(nskVar, "mapped")
-    result = newTree(nnkBlockStmt, newEmptyNode(),
-      newStmtList(
-        newLetStmt(rows, baseQuery),
-        newTree(nnkVarSection, newIdentDefs(mapped,
-          newTree(nnkBracketExpr, ident"seq", copyNimTree(retType)),
-          newTree(nnkPrefix, bindSym"@", newTree(nnkBracket)))),
-        newTree(nnkForStmt, row, rows,
-          newStmtList(
-            newCall(bindSym"add", mapped,
-              newCall(bindSym"mapQueryRowToType", copyNimTree(retType), row))
-          )
-        ),
-        mapped
-      )
-    )
+  result = queryHookImpl(q, body, false, retType)
   when defined(debugOrminDsl):
     macros.hint("Ormin Query(T): " & repr(result), body)
 
@@ -1818,39 +1754,7 @@ macro tryQuery*(args: varargs[untyped]): untyped =
   let retType = args[0]
   let body = args[1]
   var q = newQueryBuilder()
-  let baseQuery = queryImpl(q, body, true, false)
-  if q.retType.len == 0:
-    macros.error("tryQuery(T) requires a query that returns data", body)
-  if q.retTypeIsJson:
-    macros.error("tryQuery(T) does not support 'produce json'", body)
-
-  if q.singleRow:
-    let row = genSym(nskLet, "row")
-    result = newTree(nnkBlockStmt, newEmptyNode(),
-      newStmtList(
-        newLetStmt(row, baseQuery),
-        newCall(bindSym"mapQueryRowToType", copyNimTree(retType), row)
-      )
-    )
-  else:
-    let rows = genSym(nskLet, "rows")
-    let row = genSym(nskForVar, "row")
-    let mapped = genSym(nskVar, "mapped")
-    result = newTree(nnkBlockStmt, newEmptyNode(),
-      newStmtList(
-        newLetStmt(rows, baseQuery),
-        newTree(nnkVarSection, newIdentDefs(mapped,
-          newTree(nnkBracketExpr, ident"seq", copyNimTree(retType)),
-          newTree(nnkPrefix, bindSym"@", newTree(nnkBracket)))),
-        newTree(nnkForStmt, row, rows,
-          newStmtList(
-            newCall(bindSym"add", mapped,
-              newCall(bindSym"mapQueryRowToType", copyNimTree(retType), row))
-          )
-        ),
-        mapped
-      )
-    )
+  result = queryHookImpl(q, body, true, retType)
   when defined(debugOrminDsl):
     macros.hint("Ormin TryQuery(T): " & repr(result), body)
 

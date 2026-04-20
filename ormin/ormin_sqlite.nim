@@ -5,6 +5,7 @@ import json, times
 
 import db_connector/db_common
 import db_connector/sqlite3
+import query_hooks
 export db_common
 
 type
@@ -149,9 +150,15 @@ proc fillBytes(dest: var seq[byte]; src: pointer; srcLen: int) =
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
-  let srcLen = column_bytes(s, idx.cint)
-  let src = column_text(s, idx.cint)
-  fillString(dest, src, srcLen)
+  if column_type(s, idx.cint) == SQLITE_NULL:
+    when defined(nimNoNilSeqs):
+      setLen(dest, 0)
+    else:
+      dest = nil
+  else:
+    let srcLen = column_bytes(s, idx.cint)
+    let src = column_text(s, idx.cint)
+    fillString(dest, src, srcLen)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var blobType;
                      t: typedesc; name: string) =
@@ -193,6 +200,17 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     bindToJson(db, s, idx, x, t, name)
+
+template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: string) =
+  item.name = name
+  if column_type(s, idx.cint) == SQLITE_NULL:
+    item.isNull = true
+    setLen(item.value, 0)
+  else:
+    item.isNull = false
+    let srcLen = column_bytes(s, idx.cint)
+    let src = column_text(s, idx.cint)
+    fillString(item.value, src, srcLen)
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc; name: string) =

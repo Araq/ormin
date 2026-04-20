@@ -1,6 +1,7 @@
 import strutils, db_connector/postgres, json, times
 
 import db_connector/db_common
+import query_hooks
 export db_common
 
 type
@@ -129,9 +130,15 @@ proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
     
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
-  let src = pqgetvalue(queryResult, queryI, idx.cint)
-  let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
-  fillString(dest, src, srcLen)
+  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
+    when defined(nimNoNilSeqs):
+      setLen(dest, 0)
+    else:
+      dest = nil
+  else:
+    let src = pqgetvalue(queryResult, queryI, idx.cint)
+    let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
+    fillString(dest, src, srcLen)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
@@ -173,6 +180,17 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     bindToJson(db, s, idx, x, t, name)
+
+template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: string) =
+  item.name = name
+  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
+    item.isNull = true
+    setLen(item.value, 0)
+  else:
+    item.isNull = false
+    let src = pqgetvalue(queryResult, queryI, idx.cint)
+    let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
+    fillString(item.value, src, srcLen)
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc; name: string) =

@@ -181,8 +181,8 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   else:
     bindToJson(db, s, idx, x, t, name)
 
-template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: string) =
-  item.name = name
+template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; colName: string) =
+  item.name = colName
   if pqgetisnull(queryResult, queryI, idx.cint) != 0:
     item.isNull = true
     setLen(item.value, 0)
@@ -192,9 +192,9 @@ template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: 
     let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
     fillString(item.value, src, srcLen)
 
-template bindResultRawToRow*(db: DbConn; s: PStmt; idx: int; row: var DbRow; name: string) =
+template bindResultRawToRow*(db: DbConn; s: PStmt; idx: int; row: var DbRow; colName: string) =
   var item: DbItem
-  bindResultRaw(db, s, idx, item, name)
+  bindResultRaw(db, s, idx, item, colName)
   row.add item
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;

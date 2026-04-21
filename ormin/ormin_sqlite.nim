@@ -201,8 +201,8 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   else:
     bindToJson(db, s, idx, x, t, name)
 
-template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: string) =
-  item.name = name
+template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; colName: string) =
+  item.name = colName
   if column_type(s, idx.cint) == SQLITE_NULL:
     item.isNull = true
     setLen(item.value, 0)
@@ -212,9 +212,9 @@ template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: 
     let src = column_text(s, idx.cint)
     fillString(item.value, src, srcLen)
 
-proc bindResultRawToRow*(db: DbConn; s: PStmt; idx: int; row: var DbRow; name: string) =
+proc bindResultRawToRow*(db: DbConn; s: PStmt; idx: int; row: var DbRow; colName: string) =
   var item: DbItem
-  bindResultRaw(db, s, idx, item, name)
+  bindResultRaw(db, s, idx, item, colName)
   row.add item
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;

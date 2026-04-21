@@ -28,13 +28,7 @@ proc dbItemByName*(val: var DbRow; name: string): var DbItem =
   val[idx]
 
 proc fromQueryHook*(to: typedesc[string], val: var DbItem): string =
-  if val.isNull:
-    when defined(nimNoNilSeqs):
-      ""
-    else:
-      nil
-  else:
-    val.value
+  if val.isNull: "" else: val.value
 
 proc fromQueryHook*(to: typedesc[int], val: var DbItem): int =
   if val.isNull:

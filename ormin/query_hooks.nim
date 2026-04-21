@@ -1,4 +1,4 @@
-import strutils, options, json, times
+import macros, strutils, options, json, times
 
 type
   DbItem* = object
@@ -93,7 +93,7 @@ proc fromQueryHook*[T](to: typedesc[Option[T]], val: var DbItem): Option[T] =
   else:
     some(fromQueryHook(T, val))
 
-proc fromQueryHook*[T](to: typedesc[T], val: var DbItem): T =
+proc fromQueryItem*[T](to: typedesc[T], val: var DbItem): T =
   when compiles(fromQueryHook(to, val.value)):
     if val.isNull:
       raise newException(ValueError, "cannot map NULL DbItem value")
@@ -101,15 +101,16 @@ proc fromQueryHook*[T](to: typedesc[T], val: var DbItem): T =
   else:
     {.error: "No fromQueryHook for this destination type. Provide fromQueryHook(typedesc[T], val: var DbItem) or fromQueryHook(typedesc[T], val: string).".}
 
-proc fromQueryHook*[T](to: typedesc[T], val: var DbRow): T =
+proc fromQueryRow*[T](to: typedesc[T], val: var DbRow): T =
+  mixin fromQueryHook
   when compiles(block:
     var probe: T
     for field, value in fieldPairs(probe):
       discard field
       discard value):
     for field, value in fieldPairs(result):
-      var item = dbItemByName(val, field)
-      value = fromQueryHook(typeof(value), item)
+      var sourceItem = dbItemByName(val, field)
+      bindFromQueryItem(value, sourceItem)
   elif compiles(block:
     var probe: T
     new(probe)
@@ -118,13 +119,47 @@ proc fromQueryHook*[T](to: typedesc[T], val: var DbRow): T =
       discard value):
     new(result)
     for field, value in fieldPairs(result[]):
-      var item = dbItemByName(val, field)
-      value = fromQueryHook(typeof(value), item)
+      var sourceItem = dbItemByName(val, field)
+      bindFromQueryItem(value, sourceItem)
   else:
     if val.len != 1:
       raise newException(ValueError, "query(T): expected exactly one DbItem for scalar mapping")
-    var item = val[0]
-    result = fromQueryHook(T, item)
+    var sourceItem = val[0]
+    result = fromQueryItem(T, sourceItem)
+
+proc fromQueryHook*[T](to: typedesc[T], val: var DbItem): T =
+  fromQueryItem(to, val)
+
+proc fromQueryHook*[T](to: typedesc[T], val: var DbRow): T =
+  fromQueryRow(to, val)
+
+proc bindFromQueryItem*[T](dest: var T, sourceItem: var DbItem) =
+  mixin fromQueryHook
+  dest = fromQueryHook(T, sourceItem)
+
+proc fromQueryRowAst*(retType, rowExpr: NimNode): NimNode {.compileTime.} =
+  result = quote do:
+    block:
+      when `retType` is ref object:
+        var mapped: `retType`
+        new(mapped)
+        for field, value in fieldPairs(mapped[]):
+          var sourceItem = dbItemByName(`rowExpr`, field)
+          bindFromQueryItem(value, sourceItem)
+        mapped
+      elif `retType` is object:
+        var mapped: `retType`
+        for field, value in fieldPairs(mapped):
+          var sourceItem = dbItemByName(`rowExpr`, field)
+          bindFromQueryItem(value, sourceItem)
+        mapped
+      else:
+        fromQueryRow(`retType`, `rowExpr`)
+
+macro fromQueryRowExpr*(retType, val: untyped): untyped =
+  result = fromQueryRowAst(copyNimTree(retType), copyNimTree(val))
+  when defined(debugOrminDsl):
+    macros.hint("Ormin fromQueryRowExpr: " & repr(result), retType)
 
 proc toQueryHook*(val: var string, x: string) =
   val = x
@@ -168,10 +203,10 @@ proc toQueryHook*[T](val: var DbRow, x: T) =
       discard field
       discard value):
     for field, value in fieldPairs(x):
-      var item: DbItem
-      item.name = field
-      toQueryHook(item, value)
-      val.add item
+      var destItem: DbItem
+      destItem.name = field
+      toQueryHook(destItem, value)
+      val.add destItem
   elif compiles(block:
     if x.isNil:
       discard
@@ -181,11 +216,11 @@ proc toQueryHook*[T](val: var DbRow, x: T) =
     if x.isNil:
       raise newException(ValueError, "cannot map nil ref object to DbRow")
     for field, value in fieldPairs(x[]):
-      var item: DbItem
-      item.name = field
-      toQueryHook(item, value)
-      val.add item
+      var destItem: DbItem
+      destItem.name = field
+      toQueryHook(destItem, value)
+      val.add destItem
   else:
-    var item: DbItem
-    toQueryHook(item, x)
-    val.add item
+    var destItem: DbItem
+    toQueryHook(destItem, x)
+    val.add destItem

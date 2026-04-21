@@ -1648,8 +1648,13 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
   let sql = queryAsString(q, body)
   let prepStmt = genSym(nskLet)
   let res = genSym(nskVar)
+  let mapper = genSym(nskProc, "mapDbRow")
+  let mapperRow = genSym(nskParam, "row")
   result = newTree(
     nnkStmtListExpr,
+    quote do:
+      proc `mapper`(`mapperRow`: var DbRow): `retType` =
+        fromQueryRow(`retType`, `mapperRow`),
     newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   if q.singleRow:
@@ -1674,48 +1679,41 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
   action.add newTree(nnkVarSection, newIdentDefs(row, ident"DbRow",
     newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
   for idx, name in q.retNames:
-    let item = genSym(nskVar, "dbItem")
-    action.add newTree(nnkVarSection, newIdentDefs(item, ident"DbItem", newEmptyNode()))
-    action.add newCall(bindSym"bindResultRaw", ident"db", prepStmt, newLit(idx), item, newLit(name))
-    action.add newCall(bindSym"add", row, item)
-  let mappedExpr = newCall(ident"fromQueryHook", copyNimTree(retType), row)
+    action.add newCall(bindSym"bindResultRawToRow", ident"db", prepStmt, newLit(idx), row, newLit(name))
+  let mappedExpr = newCall(mapper, row)
   if q.singleRow:
     action.add newAssignment(res, mappedExpr)
   else:
     action.add newCall(bindSym"add", res, mappedExpr)
 
-  template ifStmt2Hook(prepStmt; action) {.dirty.} =
-    bind stepQuery
-    bind stopQuery
-    bind dbError
-    if stepQuery(db, prepStmt, true):
-      action
-      stopQuery(db, prepStmt)
-    else:
-      stopQuery(db, prepStmt)
-      dbError(db)
-
-  template ifStmt1Hook(prepStmt; action) {.dirty.} =
-    bind stepQuery
-    bind stopQuery
-    if stepQuery(db, prepStmt, true):
-      action
-    stopQuery(db, prepStmt)
-
-  template whileStmtHook(prepStmt; action) {.dirty.} =
-    bind stepQuery
-    bind stopQuery
-    while stepQuery(db, prepStmt, true):
-      action
-    stopQuery(db, prepStmt)
-
   if q.singleRow:
     if attempt:
-      blk.add getAst(ifStmt1Hook(prepStmt, action))
+      blk.add newTree(nnkIfStmt,
+        newTree(nnkElifBranch,
+          newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true),
+          action
+        )
+      )
+      blk.add newCall(bindSym"stopQuery", ident"db", prepStmt)
     else:
-      blk.add getAst(ifStmt2Hook(prepStmt, action))
+      blk.add newTree(nnkIfStmt,
+        newTree(nnkElifBranch,
+          newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true),
+          newStmtList(action, newCall(bindSym"stopQuery", ident"db", prepStmt))
+        ),
+        newTree(nnkElse,
+          newStmtList(
+            newCall(bindSym"stopQuery", ident"db", prepStmt),
+            newCall(bindSym"dbError", ident"db")
+          )
+        )
+      )
   else:
-    blk.add getAst(whileStmtHook(prepStmt, action))
+    blk.add newTree(nnkWhileStmt,
+      newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true),
+      action
+    )
+    blk.add newCall(bindSym"stopQuery", ident"db", prepStmt)
 
   result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
   result.add res

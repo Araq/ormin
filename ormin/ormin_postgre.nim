@@ -192,6 +192,11 @@ template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; name: 
     let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
     fillString(item.value, src, srcLen)
 
+proc bindResultRawToRow*(db: DbConn; s: PStmt; idx: int; row: var DbRow; name: string) =
+  var item: DbItem
+  bindResultRaw(db, s, idx, item, name)
+  row.add item
+
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc; name: string) =
   {.error: "invalid type for JSON object".}    

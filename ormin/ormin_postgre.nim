@@ -1,7 +1,6 @@
 import strutils, db_connector/postgres, json, times
 
 import db_connector/db_common
-import query_hooks
 export db_common
 
 type
@@ -62,6 +61,9 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
 template bindParamUnchecked(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
   pparams[idx-1] = $x
   parr[idx-1] = cstring(pparams[idx-1])
+
+template bindNullParam*(db: DbConn; s: PStmt; idx: int) =
+  parr[idx-1] = cstring(nil)
 
 template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
                         t: typedesc) =
@@ -181,21 +183,8 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   else:
     bindToJson(db, s, idx, x, t, name)
 
-template bindResultRaw*(db: DbConn; s: PStmt; idx: int; item: var DbItem; colName: string) =
-  item.name = colName
-  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
-    item.isNull = true
-    setLen(item.value, 0)
-  else:
-    item.isNull = false
-    let src = pqgetvalue(queryResult, queryI, idx.cint)
-    let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
-    fillString(item.value, src, srcLen)
-
-template bindResultRawToRow*(db: DbConn; s: PStmt; idx: int; row: var DbRow; colName: string) =
-  var item: DbItem
-  bindResultRaw(db, s, idx, item, colName)
-  row.add item
+template columnIsNull*(db: DbConn; s: PStmt; idx: int): bool =
+  pqgetisnull(queryResult, queryI, idx.cint) != 0
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc; name: string) =

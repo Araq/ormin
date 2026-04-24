@@ -32,6 +32,8 @@ type
     sql: string
     cols: seq[SourceColumn]
 
+proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode
+
 var
   functions {.compileTime.} = @[
     Function(name: "count", arity: 1, typ: dbInt),
@@ -810,10 +812,10 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     for p in q.params:
       if p.isJson:
         finalParams.add newIdentDefs(p.ex, ident"JsonNode")
-        body.add newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(i), p.ex, p.typ)
+        body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, true)
       else:
         finalParams.add newIdentDefs(p.ex, p.typ)
-        body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex, p.typ)
+        body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, false)
       inc i
   body.add newCall(bindSym"startQuery", ident"db", prepStmt)
   let yld = newStmtList()
@@ -1503,6 +1505,122 @@ proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
   else:
     result = retType
 
+proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode =
+  if isJson:
+    return newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(idx), ex, typ)
+
+  let converted = genSym(nskVar, "queryParam")
+  let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(typ))
+  let valueExpr = newTree(nnkDotExpr, converted, ident"value")
+  let isNullExpr = newTree(nnkDotExpr, converted, ident"isNull")
+  result = newTree(nnkBlockStmt, newEmptyNode(), newStmtList(
+    newTree(nnkVarSection, newIdentDefs(converted, dbValueType, newEmptyNode())),
+    newCall(bindSym"toQueryHook", converted, ex),
+    newTree(nnkIfStmt,
+      newTree(nnkElifBranch,
+        isNullExpr,
+        newStmtList(newCall(bindSym"bindNullParam", ident"db", prepStmt, newLit(idx)))
+      ),
+      newTree(nnkElse,
+        newStmtList(newCall(bindSym"bindParam", ident"db", prepStmt, newLit(idx), valueExpr, copyNimTree(typ)))
+      )
+    )
+  ))
+
+proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
+  let rawValue = genSym(nskVar, "queryValue")
+  let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
+  let rawValueExpr = newTree(nnkDotExpr, rawValue, ident"value")
+  let rawIsNullExpr = newTree(nnkDotExpr, rawValue, ident"isNull")
+  result = newTree(nnkBlockStmt, newEmptyNode(), newStmtList(
+    newTree(nnkVarSection, newIdentDefs(rawValue, dbValueType, newEmptyNode())),
+    newTree(nnkIfStmt,
+      newTree(nnkElifBranch,
+        newCall(bindSym"columnIsNull", ident"db", prepStmt, newLit(idx)),
+        newStmtList(newAssignment(rawIsNullExpr, ident"true"))
+      ),
+      newTree(nnkElse,
+        newStmtList(
+          newAssignment(rawIsNullExpr, ident"false"),
+          newCall(bindSym"bindResult", ident"db", prepStmt, newLit(idx), rawValueExpr, copyNimTree(sourceType), newLit(colName))
+        )
+      )
+    ),
+    newAssignment(destExpr, newCall(bindSym"fromQueryHook", copyNimTree(destType), rawValue))
+  ))
+
+proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): NimNode =
+  result = newStmtList()
+  for idx, name in q.retNames:
+    let fieldExpr = newTree(nnkDotExpr, mapped, ident(name))
+    let rawValue = genSym(nskVar, "queryValue")
+    let sourceType = q.retType[idx][1]
+    let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
+    let rawValueExpr = newTree(nnkDotExpr, rawValue, ident"value")
+    let rawIsNullExpr = newTree(nnkDotExpr, rawValue, ident"isNull")
+    result.add quote do:
+      when compiles(`fieldExpr`):
+        block:
+          var `rawValue`: `dbValueType`
+          if columnIsNull(db, `prepStmt`, `idx`):
+            `rawIsNullExpr` = true
+          else:
+            `rawIsNullExpr` = false
+            bindResult(db, `prepStmt`, `idx`, `rawValueExpr`, `sourceType`, `name`)
+          bindFromQueryHook(`fieldExpr`, `rawValue`)
+
+proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
+  let mapped = genSym(nskVar, "mapped")
+  let scalarMapped = genSym(nskVar, "mapped")
+  let selectedCount = newLit(q.retType.len)
+  let mappedObjectStmt = newStmtList(
+    newTree(nnkVarSection, newIdentDefs(mapped, copyNimTree(retType), newEmptyNode())),
+    buildQueryHookFieldAssigns(q, prepStmt, mapped),
+    if singleRow:
+      newAssignment(res, mapped)
+    else:
+      newCall(bindSym"add", res, mapped)
+  )
+  let mappedRefObjectStmt = newStmtList(
+    newTree(nnkVarSection, newIdentDefs(mapped, copyNimTree(retType), newEmptyNode())),
+    newCall(bindSym"new", mapped),
+    buildQueryHookFieldAssigns(q, prepStmt, mapped),
+    if singleRow:
+      newAssignment(res, mapped)
+    else:
+      newCall(bindSym"add", res, mapped)
+  )
+  let scalarStmt =
+    if singleRow:
+      newStmtList(buildHookedResultAssign(prepStmt, res, retType, q.retType[0][1], 0, q.retNames[0]))
+    else:
+      newStmtList(
+        newTree(nnkVarSection, newIdentDefs(scalarMapped, copyNimTree(retType), newEmptyNode())),
+        buildHookedResultAssign(prepStmt, scalarMapped, retType, q.retType[0][1], 0, q.retNames[0]),
+        newCall(bindSym"add", res, scalarMapped)
+      )
+
+  result = quote do:
+    block:
+      when compiles(block:
+        var probe: `retType`
+        for field, value in fieldPairs(probe):
+          discard field
+          discard value):
+        `mappedObjectStmt`
+      elif compiles(block:
+        var probe: `retType`
+        new(probe)
+        for field, value in fieldPairs(probe[]):
+          discard field
+          discard value):
+        `mappedRefObjectStmt`
+      else:
+        when `selectedCount` != 1:
+          {.error: "query(T): scalar mapping expects exactly one selected column".}
+        else:
+          `scalarStmt`
+
 proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimNode =
   expectKind body, nnkStmtList
   expectMinLen body, 1
@@ -1538,8 +1656,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   if q.params.len > 0:
     blk.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
     for p in q.params:
-      let fn = if p.isJson: bindSym"bindParamJson" else: bindSym"bindParam"
-      blk.add newCall(fn, ident"db", prepStmt, newLit(i), p.ex, p.typ)
+      blk.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, p.isJson)
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
   var body = newStmtList()
@@ -1648,13 +1765,8 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
   let sql = queryAsString(q, body)
   let prepStmt = genSym(nskLet)
   let res = genSym(nskVar)
-  let mapper = genSym(nskProc, "mapDbRow")
-  let mapperRow = genSym(nskParam, "row")
   result = newTree(
     nnkStmtListExpr,
-    quote do:
-      proc `mapper`(`mapperRow`: var DbRow): `retType` =
-        fromQueryRow(`retType`, `mapperRow`),
     newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   if q.singleRow:
@@ -1669,22 +1781,11 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
   if q.params.len > 0:
     blk.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
     for p in q.params:
-      let fn = if p.isJson: bindSym"bindParamJson" else: bindSym"bindParam"
-      blk.add newCall(fn, ident"db", prepStmt, newLit(i), p.ex, p.typ)
+      blk.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, p.isJson)
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
 
-  let row = genSym(nskVar, "dbRow")
-  var action = newStmtList()
-  action.add newTree(nnkVarSection, newIdentDefs(row, ident"DbRow",
-    newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
-  for idx, name in q.retNames:
-    action.add newCall(bindSym"bindResultRawToRow", ident"db", prepStmt, newLit(idx), row, newLit(name))
-  let mappedExpr = newCall(mapper, row)
-  if q.singleRow:
-    action.add newAssignment(res, mappedExpr)
-  else:
-    action.add newCall(bindSym"add", res, mappedExpr)
+  let action = buildQueryHookAction(q, prepStmt, res, retType, body, q.singleRow)
 
   if q.singleRow:
     if attempt:

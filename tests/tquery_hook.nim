@@ -3,19 +3,6 @@ import std/options
 
 import ormin/query_hooks
 
-type
-  DirectRow = object
-    id: int
-    message: string
-    note: Option[string]
-
-  SplitRow = object
-    parts: seq[string]
-
-  RefRow = ref object
-    id: int
-    ok: bool
-
 proc fromQueryHook*(to: typedesc[seq[string]], x: string): seq[string] =
   x.split(",")
 
@@ -23,91 +10,42 @@ proc toQueryHook*(val: var string, x: seq[string]) =
   val = x.join(",")
 
 suite "query hook helpers":
-  test "maps DbItem primitives directly":
-    var intItem = DbItem(name: "id", value: "42", isNull: false)
-    var boolItem = DbItem(name: "ok", value: "true", isNull: false)
-    var jsonItem = DbItem(name: "payload", value: """{"hello":"world"}""", isNull: false)
+  test "maps raw DbValue primitives directly":
+    check fromQueryHook(int, DbValue[int](value: 42)) == 42
+    check fromQueryHook(bool, DbValue[bool](value: true)) == true
+    check fromQueryHook(JsonNode, DbValue[JsonNode](value: %*{"hello": "world"})) == %*{"hello": "world"}
 
-    check fromQueryHook(int, intItem) == 42
-    check fromQueryHook(bool, boolItem) == true
-    check fromQueryHook(JsonNode, jsonItem) == %*{"hello": "world"}
+  test "maps null DbValue to Option":
+    check fromQueryHook(Option[string], DbValue[string](isNull: true)).isNone
+    check fromQueryHook(Option[string], DbValue[string](value: "hello")) == some("hello")
 
-  test "maps null DbItem to Option":
-    var noneItem = DbItem(name: "note", isNull: true)
-    var someItem = DbItem(name: "note", value: "hello", isNull: false)
+  test "maps null DbValue to string and JsonNode defaults":
+    check fromQueryHook(string, DbValue[string](isNull: true)) == ""
+    check fromQueryHook(JsonNode, DbValue[JsonNode](isNull: true)) == newJNull()
 
-    check fromQueryHook(Option[string], noneItem).isNone
-    check fromQueryHook(Option[string], someItem) == some("hello")
+  test "applies custom hooks over raw DB values":
+    let mapped = fromQueryHook(seq[string], DbValue[string](value: "alice,bob"))
+    check mapped == @["alice", "bob"]
 
-  test "maps DbRow to object using fieldPairs":
-    var row: DbRow = @[
-      DbItem(name: "id", value: "1", isNull: false),
-      DbItem(name: "message", value: "hello", isNull: false),
-      DbItem(name: "note", value: "memo", isNull: false)
-    ]
+  test "writes Option.none to a null DbValue":
+    var value: DbValue[string]
 
-    let mapped = fromQueryHook(DirectRow, row)
-    check mapped.id == 1
-    check mapped.message == "hello"
-    check mapped.note == some("memo")
+    toQueryHook(value, none(string))
+    check value.isNull
+    check value.value.len == 0
 
-  test "applies custom string hooks during DbRow mapping":
-    var row: DbRow = @[
-      DbItem(name: "parts", value: "alice,bob", isNull: false)
-    ]
+  test "round-trips custom hook types through DbValue":
+    var value: DbValue[string]
 
-    let mapped = fromQueryHook(SplitRow, row)
-    check mapped.parts == @["alice", "bob"]
+    toQueryHook(value, @["carol", "dave"])
+    check not value.isNull
+    check value.value == "carol,dave"
+    check fromQueryHook(seq[string], value) == @["carol", "dave"]
 
-  test "maps DbRow to ref object":
-    var row: DbRow = @[
-      DbItem(name: "id", value: "9", isNull: false),
-      DbItem(name: "ok", value: "1", isNull: false)
-    ]
-
-    let mapped = fromQueryHook(RefRow, row)
-    check not mapped.isNil
-    check mapped.id == 9
-    check mapped.ok == true
-
-  test "writes Option.none to a null DbItem":
-    var item: DbItem
-
-    toQueryHook(item, none(string))
-    check item.isNull
-    check item.value.len == 0
-
-  test "round-trips object rows through toQueryHook and fromQueryHook":
-    let source = DirectRow(id: 7, message: "roundtrip", note: some("works"))
-    var row: DbRow
-
-    toQueryHook(row, source)
-
-    check row.len == 3
-    check row[0].name == "id"
-    check row[1].name == "message"
-    check row[2].name == "note"
-
-    let mapped = fromQueryHook(DirectRow, row)
-    check mapped == source
-
-  test "round-trips custom hook types through DbRow":
-    let source = SplitRow(parts: @["carol", "dave"])
-    var row: DbRow
-
-    toQueryHook(row, source)
-
-    check row.len == 1
-    check row[0].name == "parts"
-    check row[0].value == "carol,dave"
-
-    let mapped = fromQueryHook(SplitRow, row)
-    check mapped == source
-
-  test "round-trips DateTime through DbItem":
+  test "round-trips DateTime through DbValue":
     let source = dateTime(2024, mJan, 2, 3, 4, 5, zone = utc())
-    var item: DbItem
+    var value: DbValue[DateTime]
 
-    toQueryHook(item, source)
-    let mapped = fromQueryHook(DateTime, item)
-    check mapped == source
+    toQueryHook(value, source)
+    check not value.isNull
+    check fromQueryHook(DateTime, value) == source

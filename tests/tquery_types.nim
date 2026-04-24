@@ -39,6 +39,9 @@ type
 proc fromQueryHook*(to: typedesc[seq[string]], x: string): seq[string] =
   x.split(",")
 
+proc toQueryHook*(val: var string, x: seq[string]) =
+  val = x.join(",")
+
 when backend == DbBackend.sqlite:
   const
     benchmarkRowCount = 256
@@ -118,6 +121,18 @@ suite &"query(T) mapping on {backend}":
 
     check rows[0].parts == @["alice", "bob"]
     check rows[1].parts == @["carol", "dave"]
+
+  test "applies toQueryHook for custom parameter types":
+    let parts = @["erin", "frank"]
+
+    query:
+      insert tb_string(typstring = ?parts)
+
+    let rows = query(SplitMessageRow):
+      select tb_string(typstring as parts)
+      where typstring == "erin,frank"
+
+    check rows == @[SplitMessageRow(parts: @["erin", "frank"])]
 
   test "single-row query(T) returns a single object":
     let row = query(CompositeRow):

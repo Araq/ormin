@@ -114,7 +114,7 @@ suite &"query(T) mapping on {backend}":
       CompositeRow(id: 2, message: "world")
     ]
 
-  test "applies fromQueryHook per destination field type":
+  test "applies destination hook per field type":
     let rows = query(SplitMessageRow):
       select tb_string(typstring as parts)
       orderby typstring
@@ -122,7 +122,7 @@ suite &"query(T) mapping on {backend}":
     check rows[0].parts == @["alice", "bob"]
     check rows[1].parts == @["carol", "dave"]
 
-  test "applies toQueryHook for custom parameter types":
+  test "applies parameter hook for custom parameter types":
     let parts = @["erin", "frank"]
 
     query:

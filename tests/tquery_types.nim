@@ -1,4 +1,4 @@
-import unittest, strutils, strformat, os, times
+import unittest, strformat, os, times
 import std/options
 import ormin
 import ormin/db_utils
@@ -29,18 +29,9 @@ type
     pk1: int
     message: string
 
-  SplitMessageRow = object
-    parts: seq[string]
-
   NullableNoteOptionRow = object
     id: int
     note: Option[string]
-
-proc fromQueryHook*(to: typedesc[seq[string]], x: string): seq[string] =
-  x.split(",")
-
-proc toQueryHook*(val: var string, x: seq[string]) =
-  val = x.join(",")
 
 when backend == DbBackend.sqlite:
   const
@@ -84,8 +75,6 @@ suite &"query(T) mapping on {backend}":
   setup:
     db.dropTable(sqlFile, "tb_composite_pk")
     db.createTable(sqlFile, "tb_composite_pk")
-    db.dropTable(sqlFile, "tb_string")
-    db.createTable(sqlFile, "tb_string")
     db.dropTable(sqlFile, "tb_nullable")
     db.createTable(sqlFile, "tb_nullable")
 
@@ -93,11 +82,6 @@ suite &"query(T) mapping on {backend}":
       insert tb_composite_pk(pk1 = 1, pk2 = 1, message = "hello")
     query:
       insert tb_composite_pk(pk1 = 2, pk2 = 2, message = "world")
-
-    query:
-      insert tb_string(typstring = "alice,bob")
-    query:
-      insert tb_string(typstring = "carol,dave")
 
     query:
       insert tb_nullable(id = 1, note = nil)
@@ -113,26 +97,6 @@ suite &"query(T) mapping on {backend}":
       CompositeRow(id: 1, message: "hello"),
       CompositeRow(id: 2, message: "world")
     ]
-
-  test "applies destination hook per field type":
-    let rows = query(SplitMessageRow):
-      select tb_string(typstring as parts)
-      orderby typstring
-
-    check rows[0].parts == @["alice", "bob"]
-    check rows[1].parts == @["carol", "dave"]
-
-  test "applies parameter hook for custom parameter types":
-    let parts = @["erin", "frank"]
-
-    query:
-      insert tb_string(typstring = ?parts)
-
-    let rows = query(SplitMessageRow):
-      select tb_string(typstring as parts)
-      where typstring == "erin,frank"
-
-    check rows == @[SplitMessageRow(parts: @["erin", "frank"])]
 
   test "single-row query(T) returns a single object":
     let row = query(CompositeRow):

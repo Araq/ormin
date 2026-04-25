@@ -2,6 +2,7 @@ import unittest, strformat, os, times
 import std/options
 import ormin
 import ormin/db_utils
+import ormin/query_hooks
 
 when defined(postgre):
   when defined(macosx):
@@ -33,12 +34,33 @@ type
     id: int
     note: Option[string]
 
+  MessageSize = distinct int
+
+  HookedMessageRow = object
+    id: int
+    message: MessageSize
+
+  NullFallbackNote = distinct string
+
+  HookedNullableNoteRow = object
+    id: int
+    note: NullFallbackNote
+
 const
   benchmarkRowCount = 256
   benchmarkWarmupIterations = 75
   benchmarkIterations = 250
   benchmarkRounds = 5
   maxTypedQuerySlowdown = 1.20
+
+proc fromQueryHook*(to: typedesc[MessageSize], value: string): MessageSize =
+  MessageSize(value.len)
+
+proc fromQueryHook*(to: typedesc[NullFallbackNote], value: DbValue[string]): NullFallbackNote =
+  if value.isNull:
+    NullFallbackNote("<missing>")
+  else:
+    NullFallbackNote("note:" & value.value)
 
 proc loadBenchmarkRows() =
   db.dropTable(sqlFile, "tb_composite_pk")
@@ -116,6 +138,37 @@ suite &"query(T) mapping on {backend}":
     check rows[1].note.isSome
     check rows[1].note.get == "hello"
 
+  test "maps object fields through user fromQueryHook overloads":
+    let rows = query(HookedMessageRow):
+      select tb_composite_pk(pk1 as id, message)
+      orderby pk1
+
+    check rows.len == 2
+    check rows[0].id == 1
+    check int(rows[0].message) == "hello".len
+    check rows[1].id == 2
+    check int(rows[1].message) == "world".len
+
+  test "maps scalar query(T) through user fromQueryHook overloads":
+    let values = query(MessageSize):
+      select tb_composite_pk(message)
+      orderby pk1
+
+    check values.len == 2
+    check int(values[0]) == "hello".len
+    check int(values[1]) == "world".len
+
+  test "allows user fromQueryHook overloads to handle NULL values":
+    let rows = query(HookedNullableNoteRow):
+      select tb_nullable(id, note)
+      orderby id
+
+    check rows.len == 2
+    check rows[0].id == 1
+    check string(rows[0].note) == "<missing>"
+    check rows[1].id == 2
+    check string(rows[1].note) == "note:hello"
+
   test "sqlite benchmark for query and query(T)":
       loadBenchmarkRows()
 
@@ -144,4 +197,3 @@ suite &"query(T) mapping on {backend}":
       check typedBest > 0.0
       when defined(release):
         check ratio <= maxTypedQuerySlowdown
-

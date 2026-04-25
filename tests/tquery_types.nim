@@ -57,10 +57,10 @@ const
   benchmarkRounds = 5
   maxTypedQuerySlowdown = 1.20
 
-proc fromQueryHook*(to: typedesc[MessageSize], value: string): MessageSize =
+proc fromQueryHook*(tp: typedesc[MessageSize], value: string): MessageSize =
   MessageSize(value.len)
 
-proc fromQueryHook*(to: typedesc[NullFallbackNote], value: DbValue[string]): NullFallbackNote =
+proc fromQueryHook*(tp: typedesc[NullFallbackNote], value: DbValue[string]): NullFallbackNote =
   if value.isNull:
     NullFallbackNote("<missing>")
   else:

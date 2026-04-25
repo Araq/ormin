@@ -288,7 +288,7 @@ type
     id: int
     title: TitleLength
 
-proc fromQueryHook*(to: typedesc[TitleLength], value: string): TitleLength =
+proc fromQueryHook*(tp: typedesc[TitleLength], value: string): TitleLength =
   TitleLength(value.len)
 
 let rows = query(ThreadTitleSize):
@@ -301,7 +301,7 @@ If a hook needs to handle SQL `NULL` itself, accept a `DbValue[SourceType]`:
 type
   NullableTitle = distinct string
 
-proc fromQueryHook*(to: typedesc[NullableTitle], value: DbValue[string]): NullableTitle =
+proc fromQueryHook*(tp: typedesc[NullableTitle], value: DbValue[string]): NullableTitle =
   if value.isNull:
     NullableTitle("<untitled>")
   else:

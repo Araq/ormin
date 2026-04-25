@@ -5,7 +5,7 @@ type
     isNull*: bool
     value*: T
 
-template fromQueryHook*[T, S](to: typedesc[T], x: S): T =
+template fromQueryHook*[T, S](tp: typedesc[T], x: S): T =
   ## Default conversion hook used by `query(T): ...`.
   ## Users can overload this proc to customize field/type conversions.
   block:
@@ -20,13 +20,13 @@ template toQueryHook*[T, S](val: var T, x: S) =
 proc nullQueryValueError() {.noreturn.} =
   raise newException(ValueError, "cannot map NULL query result")
 
-proc fromQueryHook*[T, S](to: typedesc[Option[T]], x: DbValue[S]): Option[T] =
+proc fromQueryHook*[T, S](tp: typedesc[Option[T]], x: DbValue[S]): Option[T] =
   if x.isNull:
     none(T)
   else:
     some(fromQueryHook(T, x.value))
 
-proc fromQueryHook*[T, S](to: typedesc[T], x: DbValue[S]): T =
+proc fromQueryHook*[T, S](tp: typedesc[T], x: DbValue[S]): T =
   if x.isNull:
     when T is string:
       ""

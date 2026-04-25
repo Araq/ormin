@@ -1513,41 +1513,29 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
   let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(typ))
   let valueExpr = newTree(nnkDotExpr, converted, ident"value")
   let isNullExpr = newTree(nnkDotExpr, converted, ident"isNull")
-  result = newTree(nnkBlockStmt, newEmptyNode(), newStmtList(
-    newTree(nnkVarSection, newIdentDefs(converted, dbValueType, newEmptyNode())),
-    newCall(bindSym"toQueryHook", converted, ex),
-    newTree(nnkIfStmt,
-      newTree(nnkElifBranch,
-        isNullExpr,
-        newStmtList(newCall(bindSym"bindNullParam", ident"db", prepStmt, newLit(idx)))
-      ),
-      newTree(nnkElse,
-        newStmtList(newCall(bindSym"bindParam", ident"db", prepStmt, newLit(idx), valueExpr, copyNimTree(typ)))
-      )
-    )
-  ))
+  result = quote do:
+    block:
+      var `converted`: `dbValueType`
+      toQueryHook(`converted`, `ex`)
+      if `isNullExpr`:
+        bindNullParam(db, `prepStmt`, `idx`)
+      else:
+        bindParam(db, `prepStmt`, `idx`, `valueExpr`, `typ`)
 
 proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
   let rawValue = genSym(nskVar, "queryValue")
   let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
   let rawValueExpr = newTree(nnkDotExpr, rawValue, ident"value")
   let rawIsNullExpr = newTree(nnkDotExpr, rawValue, ident"isNull")
-  result = newTree(nnkBlockStmt, newEmptyNode(), newStmtList(
-    newTree(nnkVarSection, newIdentDefs(rawValue, dbValueType, newEmptyNode())),
-    newTree(nnkIfStmt,
-      newTree(nnkElifBranch,
-        newCall(bindSym"columnIsNull", ident"db", prepStmt, newLit(idx)),
-        newStmtList(newAssignment(rawIsNullExpr, ident"true"))
-      ),
-      newTree(nnkElse,
-        newStmtList(
-          newAssignment(rawIsNullExpr, ident"false"),
-          newCall(bindSym"bindResult", ident"db", prepStmt, newLit(idx), rawValueExpr, copyNimTree(sourceType), newLit(colName))
-        )
-      )
-    ),
-    newAssignment(destExpr, newCall(bindSym"fromQueryHook", copyNimTree(destType), rawValue))
-  ))
+  result = quote do:
+    block:
+      var `rawValue`: `dbValueType`
+      if columnIsNull(db, `prepStmt`, `idx`):
+        `rawIsNullExpr` = true
+      else:
+        `rawIsNullExpr` = false
+        bindResult(db, `prepStmt`, `idx`, `rawValueExpr`, `sourceType`, `colName`)
+      `destExpr` = fromQueryHook(`destType`, `rawValue`)
 
 proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): NimNode =
   result = newStmtList()
@@ -1574,7 +1562,9 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
   let scalarMapped = genSym(nskVar, "mapped")
   let selectedCount = newLit(q.retType.len)
   let mappedObjectStmt = newStmtList(
-    newTree(nnkVarSection, newIdentDefs(mapped, copyNimTree(retType), newEmptyNode())),
+    quote do:
+      var `mapped`: `retType`
+    ,
     buildQueryHookFieldAssigns(q, prepStmt, mapped),
     if singleRow:
       newAssignment(res, mapped)
@@ -1582,8 +1572,12 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
       newCall(bindSym"add", res, mapped)
   )
   let mappedRefObjectStmt = newStmtList(
-    newTree(nnkVarSection, newIdentDefs(mapped, copyNimTree(retType), newEmptyNode())),
-    newCall(bindSym"new", mapped),
+    quote do:
+      var `mapped`: `retType`
+    ,
+    quote do:
+      new(`mapped`)
+    ,
     buildQueryHookFieldAssigns(q, prepStmt, mapped),
     if singleRow:
       newAssignment(res, mapped)
@@ -1595,7 +1589,9 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
       newStmtList(buildHookedResultAssign(prepStmt, res, retType, q.retType[0][1], 0, q.retNames[0]))
     else:
       newStmtList(
-        newTree(nnkVarSection, newIdentDefs(scalarMapped, copyNimTree(retType), newEmptyNode())),
+        quote do:
+          var `scalarMapped`: `retType`
+        ,
         buildHookedResultAssign(prepStmt, scalarMapped, retType, q.retType[0][1], 0, q.retNames[0]),
         newCall(bindSym"add", res, scalarMapped)
       )

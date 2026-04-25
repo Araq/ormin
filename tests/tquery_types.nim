@@ -209,7 +209,7 @@ suite &"query(T) mapping on {backend}":
         typedBest = min(typedBest, benchmarkTypedQuery(benchmarkIterations))
 
       let ratio = typedBest / currentBest
-      echo &"sqlite benchmark query={currentBest:.6f}s query(T)={typedBest:.6f}s ratio={ratio:.3f}x; 10% budget={(ratio <= maxTypedQuerySlowdown)}"
+      echo &"sqlite benchmark query={currentBest:.6f}s query(T)={typedBest:.6f}s ratio={ratio:.3f}x; 20% budget={(ratio <= maxTypedQuerySlowdown)}"
       check currentBest > 0.0
       check typedBest > 0.0
       when defined(release):

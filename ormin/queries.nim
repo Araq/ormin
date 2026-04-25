@@ -1515,7 +1515,6 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
 
 proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
   result = quote do:
-    block:
       var rawValue: DbValue[`sourceType`]
       if columnIsNull(db, `prepStmt`, `idx`):
         rawValue.isNull = true
@@ -1531,7 +1530,6 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): Nim
     let sourceType = q.retType[idx][1]
     result.add quote do:
       when compiles(`mapped`.`fieldName`):
-        block:
           var rawValue: DbValue[`sourceType`]
           if columnIsNull(db, `prepStmt`, `idx`):
             rawValue.isNull = true

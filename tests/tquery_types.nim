@@ -33,43 +33,42 @@ type
     id: int
     note: Option[string]
 
-when backend == DbBackend.sqlite:
-  const
-    benchmarkRowCount = 256
-    benchmarkWarmupIterations = 75
-    benchmarkIterations = 250
-    benchmarkRounds = 5
-    maxTypedQuerySlowdown = 1.20
+const
+  benchmarkRowCount = 256
+  benchmarkWarmupIterations = 75
+  benchmarkIterations = 250
+  benchmarkRounds = 5
+  maxTypedQuerySlowdown = 1.20
 
-  proc loadBenchmarkRows() =
-    db.dropTable(sqlFile, "tb_composite_pk")
-    db.createTable(sqlFile, "tb_composite_pk")
-    for i in 1 .. benchmarkRowCount:
-      let message = &"message-{i}"
-      query:
-        insert tb_composite_pk(pk1 = ?i, pk2 = ?i, message = ?message)
+proc loadBenchmarkRows() =
+  db.dropTable(sqlFile, "tb_composite_pk")
+  db.createTable(sqlFile, "tb_composite_pk")
+  for i in 1 .. benchmarkRowCount:
+    let message = &"message-{i}"
+    query:
+      insert tb_composite_pk(pk1 = ?i, pk2 = ?i, message = ?message)
 
-  proc benchmarkCurrentQuery(iterations: int): float =
-    var checksum = 0
-    let started = cpuTime()
-    for _ in 0 ..< iterations:
-      let rows = query:
-        select tb_composite_pk(pk1, message)
-        orderby pk1
-      checksum += rows.len + rows[^1][0] + rows[^1][1].len
-    doAssert checksum > 0
-    result = cpuTime() - started
+proc benchmarkCurrentQuery(iterations: int): float =
+  var checksum = 0
+  let started = cpuTime()
+  for _ in 0 ..< iterations:
+    let rows = query:
+      select tb_composite_pk(pk1, message)
+      orderby pk1
+    checksum += rows.len + rows[^1][0] + rows[^1][1].len
+  doAssert checksum > 0
+  result = cpuTime() - started
 
-  proc benchmarkTypedQuery(iterations: int): float =
-    var checksum = 0
-    let started = cpuTime()
-    for _ in 0 ..< iterations:
-      let rows = query(BenchmarkCompositeRow):
-        select tb_composite_pk(pk1, message)
-        orderby pk1
-      checksum += rows.len + rows[^1].pk1 + rows[^1].message.len
-    doAssert checksum > 0
-    result = cpuTime() - started
+proc benchmarkTypedQuery(iterations: int): float =
+  var checksum = 0
+  let started = cpuTime()
+  for _ in 0 ..< iterations:
+    let rows = query(BenchmarkCompositeRow):
+      select tb_composite_pk(pk1, message)
+      orderby pk1
+    checksum += rows.len + rows[^1].pk1 + rows[^1].message.len
+  doAssert checksum > 0
+  result = cpuTime() - started
 
 suite &"query(T) mapping on {backend}":
   setup:

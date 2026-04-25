@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.8.1"
+version       = "0.9.0"
 author        = "Araq"
 description = "Prepared SQL statement generator. A lightweight ORM."
 license       = "MIT"

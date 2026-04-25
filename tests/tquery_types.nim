@@ -1,4 +1,4 @@
-import unittest, strformat, os, times
+import unittest, strformat, os, times, std/monotimes
 import std/options
 import ormin
 import ormin/db_utils
@@ -76,25 +76,25 @@ proc loadBenchmarkRows() =
 
 proc benchmarkCurrentQuery(iterations: int): float =
   var checksum = 0
-  let started = cpuTime()
+  let started = getMonoTime()
   for _ in 0 ..< iterations:
     let rows = query:
       select tb_composite_pk(pk1, message)
       orderby pk1
     checksum += rows.len + rows[^1][0] + rows[^1][1].len
   doAssert checksum > 0
-  result = cpuTime() - started
+  result = (getMonoTime() - started).inNanoseconds.float / 1_000_000_000.0
 
 proc benchmarkTypedQuery(iterations: int): float =
   var checksum = 0
-  let started = cpuTime()
+  let started = getMonoTime()
   for _ in 0 ..< iterations:
     let rows = query(BenchmarkCompositeRow):
       select tb_composite_pk(pk1, message)
       orderby pk1
     checksum += rows.len + rows[^1].pk1 + rows[^1].message.len
   doAssert checksum > 0
-  result = cpuTime() - started
+  result = (getMonoTime() - started).inNanoseconds.float / 1_000_000_000.0
 
 suite &"query(T) mapping on {backend}":
   setup:

@@ -1529,20 +1529,19 @@ proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; 
 proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): NimNode =
   result = newStmtList()
   for idx, name in q.retNames:
-    let fieldExpr = newTree(nnkDotExpr, mapped, ident(name))
+    let fieldName = ident(name)
     let rawValue = genSym(nskVar, "queryValue")
     let sourceType = q.retType[idx][1]
-    let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
     result.add quote do:
-      when compiles(`fieldExpr`):
+      when compiles(`mapped`.`fieldName`):
         block:
-          var `rawValue`: `dbValueType`
+          var `rawValue`: DbValue[`sourceType`]
           if columnIsNull(db, `prepStmt`, `idx`):
             `rawValue`.isNull = true
           else:
             `rawValue`.isNull = false
             bindResult(db, `prepStmt`, `idx`, `rawValue`.value, `sourceType`, `name`)
-          bindFromQueryHook(`fieldExpr`, `rawValue`)
+          bindFromQueryHook(`mapped`.`fieldName`, `rawValue`)
 
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
   let mapped = genSym(nskVar, "mapped")

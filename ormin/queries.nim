@@ -1493,12 +1493,6 @@ proc renderInlineQuery(n: NimNode; params: var Params;
   result.sql = queryAsString(subq, n)
   result.typ = DbType(kind: dbSet)
 
-proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
-  result = newTree(nnkVarSection,
-    newTree(nnkIdentDefs, newTree(nnkPragmaExpr, name,
-      newTree(nnkPragma, ident"global")), typ, value)
-  )
-
 proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
   if not singleRow:
     result = newTree(nnkBracketExpr, bindSym"seq", retType)
@@ -1510,10 +1504,10 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
     return newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(idx), ex, typ)
 
   let converted = genSym(nskVar, "queryParam")
-  let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(typ))
+  let dbValueType = copyNimTree(typ)
   result = quote do:
     block:
-      var `converted`: `dbValueType`
+      var `converted`: DbValue[`typ`]
       toQueryHook(`converted`, `ex`)
       if `converted`.isNull:
         bindNullParam(db, `prepStmt`, `idx`)

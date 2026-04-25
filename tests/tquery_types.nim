@@ -26,6 +26,10 @@ type
     id: int
     message: string
 
+  RefCompositeRow = ref object
+    id: int
+    message: string
+
   BenchmarkCompositeRow = object
     pk1: int
     message: string
@@ -118,6 +122,19 @@ suite &"query(T) mapping on {backend}":
       CompositeRow(id: 1, message: "hello"),
       CompositeRow(id: 2, message: "world")
     ]
+
+  test "maps selected rows to ref objects":
+    let rows = query(RefCompositeRow):
+      select tb_composite_pk(pk1 as id, message)
+      orderby pk1
+
+    check rows.len == 2
+    check rows[0] != nil
+    check rows[0].id == 1
+    check rows[0].message == "hello"
+    check rows[1] != nil
+    check rows[1].id == 2
+    check rows[1].message == "world"
 
   test "single-row query(T) returns a single object":
     let row = query(CompositeRow):

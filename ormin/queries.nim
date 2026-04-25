@@ -1528,18 +1528,17 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): Nim
   result = newStmtList()
   for idx, name in q.retNames:
     let fieldName = ident(name)
-    let rawValue = genSym(nskVar, "queryValue")
     let sourceType = q.retType[idx][1]
     result.add quote do:
       when compiles(`mapped`.`fieldName`):
         block:
-          var `rawValue`: DbValue[`sourceType`]
+          var rawValue: DbValue[`sourceType`]
           if columnIsNull(db, `prepStmt`, `idx`):
-            `rawValue`.isNull = true
+            rawValue.isNull = true
           else:
-            `rawValue`.isNull = false
-            bindResult(db, `prepStmt`, `idx`, `rawValue`.value, `sourceType`, `name`)
-          bindFromQueryHook(`mapped`.`fieldName`, `rawValue`)
+            rawValue.isNull = false
+            bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `name`)
+          bindFromQueryHook(`mapped`.`fieldName`, rawValue)
 
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
   let mapped = genSym(nskVar, "mapped")

@@ -1511,30 +1511,26 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
 
   let converted = genSym(nskVar, "queryParam")
   let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(typ))
-  let valueExpr = newTree(nnkDotExpr, converted, ident"value")
-  let isNullExpr = newTree(nnkDotExpr, converted, ident"isNull")
   result = quote do:
     block:
       var `converted`: `dbValueType`
       toQueryHook(`converted`, `ex`)
-      if `isNullExpr`:
+      if `converted`.isNull:
         bindNullParam(db, `prepStmt`, `idx`)
       else:
-        bindParam(db, `prepStmt`, `idx`, `valueExpr`, `typ`)
+        bindParam(db, `prepStmt`, `idx`, `converted`.value, `typ`)
 
 proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
   let rawValue = genSym(nskVar, "queryValue")
   let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
-  let rawValueExpr = newTree(nnkDotExpr, rawValue, ident"value")
-  let rawIsNullExpr = newTree(nnkDotExpr, rawValue, ident"isNull")
   result = quote do:
     block:
       var `rawValue`: `dbValueType`
       if columnIsNull(db, `prepStmt`, `idx`):
-        `rawIsNullExpr` = true
+        `rawValue`.isNull = true
       else:
-        `rawIsNullExpr` = false
-        bindResult(db, `prepStmt`, `idx`, `rawValueExpr`, `sourceType`, `colName`)
+        `rawValue`.isNull = false
+        bindResult(db, `prepStmt`, `idx`, `rawValue`.value, `sourceType`, `colName`)
       `destExpr` = fromQueryHook(`destType`, `rawValue`)
 
 proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): NimNode =
@@ -1544,17 +1540,15 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): Nim
     let rawValue = genSym(nskVar, "queryValue")
     let sourceType = q.retType[idx][1]
     let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
-    let rawValueExpr = newTree(nnkDotExpr, rawValue, ident"value")
-    let rawIsNullExpr = newTree(nnkDotExpr, rawValue, ident"isNull")
     result.add quote do:
       when compiles(`fieldExpr`):
         block:
           var `rawValue`: `dbValueType`
           if columnIsNull(db, `prepStmt`, `idx`):
-            `rawIsNullExpr` = true
+            `rawValue`.isNull = true
           else:
-            `rawIsNullExpr` = false
-            bindResult(db, `prepStmt`, `idx`, `rawValueExpr`, `sourceType`, `name`)
+            `rawValue`.isNull = false
+            bindResult(db, `prepStmt`, `idx`, `rawValue`.value, `sourceType`, `name`)
           bindFromQueryHook(`fieldExpr`, `rawValue`)
 
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =

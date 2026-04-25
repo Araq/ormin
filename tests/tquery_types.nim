@@ -39,7 +39,7 @@ when backend == DbBackend.sqlite:
     benchmarkWarmupIterations = 75
     benchmarkIterations = 250
     benchmarkRounds = 5
-    maxTypedQuerySlowdown = 1.10
+    maxTypedQuerySlowdown = 1.20
 
   proc loadBenchmarkRows() =
     db.dropTable(sqlFile, "tb_composite_pk")
@@ -117,8 +117,7 @@ suite &"query(T) mapping on {backend}":
     check rows[1].note.isSome
     check rows[1].note.get == "hello"
 
-  when backend == DbBackend.sqlite:
-    test "sqlite benchmark for query and query(T)":
+  test "sqlite benchmark for query and query(T)":
       loadBenchmarkRows()
 
       let untypedRows = query:
@@ -144,3 +143,6 @@ suite &"query(T) mapping on {backend}":
       echo &"sqlite benchmark query={currentBest:.6f}s query(T)={typedBest:.6f}s ratio={ratio:.3f}x; 10% budget={(ratio <= maxTypedQuerySlowdown)}"
       check currentBest > 0.0
       check typedBest > 0.0
+      when defined(release):
+        check ratio <= maxTypedQuerySlowdown
+

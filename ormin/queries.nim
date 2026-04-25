@@ -1506,24 +1506,23 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
   let converted = genSym(nskVar, "queryParam")
   result = quote do:
     block:
-      var `converted`: DbValue[`typ`]
-      toQueryHook(`converted`, `ex`)
-      if `converted`.isNull:
+      var converted: DbValue[`typ`]
+      toQueryHook(converted, `ex`)
+      if converted.isNull:
         bindNullParam(db, `prepStmt`, `idx`)
       else:
-        bindParam(db, `prepStmt`, `idx`, `converted`.value, `typ`)
+        bindParam(db, `prepStmt`, `idx`, converted.value, `typ`)
 
 proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
-  let rawValue = genSym(nskVar, "queryValue")
   result = quote do:
     block:
-      var `rawValue`: DbValue[`sourceType`]
+      var rawValue: DbValue[`sourceType`]
       if columnIsNull(db, `prepStmt`, `idx`):
-        `rawValue`.isNull = true
+        rawValue.isNull = true
       else:
-        `rawValue`.isNull = false
-        bindResult(db, `prepStmt`, `idx`, `rawValue`.value, `sourceType`, `colName`)
-      `destExpr` = fromQueryHook(`destType`, `rawValue`)
+        rawValue.isNull = false
+        bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `colName`)
+      `destExpr` = fromQueryHook(`destType`, rawValue)
 
 proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): NimNode =
   result = newStmtList()

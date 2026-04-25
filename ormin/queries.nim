@@ -1523,8 +1523,11 @@ proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; 
         bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `colName`)
       `destExpr` = fromQueryHook(`destType`, rawValue)
 
-proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): NimNode =
+proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
   result = newStmtList()
+  let mapped = genSym(nskVar, "mapped")
+  result.add quote do:
+    var `mapped` = `retType`()
   for idx, name in q.retNames:
     let fieldName = ident(name)
     let sourceType = q.retType[idx][1]
@@ -1537,22 +1540,19 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt, mapped: NimNode): Nim
             rawValue.isNull = false
             bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `name`)
           bindFromQueryHook(`mapped`.`fieldName`, rawValue)
+  if singleRow:
+    result.add quote do:
+      `res` = `mapped`
+  else:
+    result.add quote do:
+      `res`.add(`mapped`)
 
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
-  let mapped = genSym(nskVar, "mapped")
   let scalarMapped = genSym(nskVar, "mapped")
   let selectedCount = newLit(q.retType.len)
   let mappedObjectStmt = newStmtList(
-    quote do:
-      var `mapped` = `retType`()
-    ,
-    buildQueryHookFieldAssigns(q, prepStmt, mapped),
-    if singleRow:
-      newAssignment(res, mapped)
-    else:
-      newCall(bindSym"add", res, mapped)
+    buildQueryHookFieldAssigns(q, prepStmt, singleRow, res, retType),
   )
-  let mappedRefObjectStmt = copyNimTree(mappedObjectStmt)
   let scalarStmt =
     if singleRow:
       newStmtList(buildHookedResultAssign(prepStmt, res, retType, q.retType[0][1], 0, q.retNames[0]))
@@ -1579,7 +1579,7 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
         for field, value in fieldPairs(probe[]):
           discard field
           discard value):
-        `mappedRefObjectStmt`
+        `mappedObjectStmt`
       else:
         when `selectedCount` != 1:
           {.error: "query(T): scalar mapping expects exactly one selected column".}

@@ -1570,9 +1570,6 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
 
   result = quote do:
     block:
-      static:
-        echo "\nCOMPOSITE CHECK: ", arity(`retType`), " is object: ", `retType` is object, " is ref: ", `retType` is ref object
-
       when `retType` is object or `retType` is ref object:
         `mappedObjectStmt`
       else:

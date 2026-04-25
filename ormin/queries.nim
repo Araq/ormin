@@ -1547,6 +1547,9 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: b
     result.add quote do:
       `res`.add(`mapped`)
 
+import std/typetraits
+export typetraits
+
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
   let scalarMapped = genSym(nskVar, "mapped")
   let selectedCount = newLit(q.retType.len)
@@ -1567,18 +1570,10 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
 
   result = quote do:
     block:
-      when compiles(block:
-        var probe: `retType`
-        for field, value in fieldPairs(probe):
-          discard field
-          discard value):
-        `mappedObjectStmt`
-      elif compiles(block:
-        var probe: `retType`
-        new(probe)
-        for field, value in fieldPairs(probe[]):
-          discard field
-          discard value):
+      static:
+        echo "\nCOMPOSITE CHECK: ", arity(`retType`), " is object: ", `retType` is object, " is ref: ", `retType` is ref object
+
+      when `retType` is object or `retType` is ref object:
         `mappedObjectStmt`
       else:
         when `selectedCount` != 1:

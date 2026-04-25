@@ -1516,10 +1516,9 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
 
 proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
   let rawValue = genSym(nskVar, "queryValue")
-  let dbValueType = newTree(nnkBracketExpr, bindSym"DbValue", copyNimTree(sourceType))
   result = quote do:
     block:
-      var `rawValue`: `dbValueType`
+      var `rawValue`: DbValue[`sourceType`]
       if columnIsNull(db, `prepStmt`, `idx`):
         `rawValue`.isNull = true
       else:

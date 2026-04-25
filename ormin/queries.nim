@@ -1544,7 +1544,7 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
   let selectedCount = newLit(q.retType.len)
   let mappedObjectStmt = newStmtList(
     quote do:
-      var `mapped`: `retType`
+      var `mapped` = `retType`()
     ,
     buildQueryHookFieldAssigns(q, prepStmt, mapped),
     if singleRow:
@@ -1552,19 +1552,7 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode
     else:
       newCall(bindSym"add", res, mapped)
   )
-  let mappedRefObjectStmt = newStmtList(
-    quote do:
-      var `mapped`: `retType`
-    ,
-    quote do:
-      new(`mapped`)
-    ,
-    buildQueryHookFieldAssigns(q, prepStmt, mapped),
-    if singleRow:
-      newAssignment(res, mapped)
-    else:
-      newCall(bindSym"add", res, mapped)
-  )
+  let mappedRefObjectStmt = copyNimTree(mappedObjectStmt)
   let scalarStmt =
     if singleRow:
       newStmtList(buildHookedResultAssign(prepStmt, res, retType, q.retType[0][1], 0, q.retNames[0]))

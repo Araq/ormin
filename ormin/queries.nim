@@ -10,6 +10,7 @@ import db_connector/db_common
 from os import parentDir, `/`
 
 import db_types
+import query_hooks
 
 # SQL dialect specific things:
 const
@@ -30,6 +31,8 @@ type
     name: string
     sql: string
     cols: seq[SourceColumn]
+
+proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode
 
 var
   functions {.compileTime.} = @[
@@ -809,10 +812,10 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     for p in q.params:
       if p.isJson:
         finalParams.add newIdentDefs(p.ex, ident"JsonNode")
-        body.add newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(i), p.ex, p.typ)
+        body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, true)
       else:
         finalParams.add newIdentDefs(p.ex, p.typ)
-        body.add newCall(bindSym"bindParam", ident"db", prepStmt, newLit(i), p.ex, p.typ)
+        body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, false)
       inc i
   body.add newCall(bindSym"startQuery", ident"db", prepStmt)
   let yld = newStmtList()
@@ -1490,17 +1493,74 @@ proc renderInlineQuery(n: NimNode; params: var Params;
   result.sql = queryAsString(subq, n)
   result.typ = DbType(kind: dbSet)
 
-proc newGlobalVar(name, typ: NimNode, value: NimNode): NimNode =
-  result = newTree(nnkVarSection,
-    newTree(nnkIdentDefs, newTree(nnkPragmaExpr, name,
-      newTree(nnkPragma, ident"global")), typ, value)
-  )
-
 proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
   if not singleRow:
     result = newTree(nnkBracketExpr, bindSym"seq", retType)
   else:
     result = retType
+
+proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode =
+  if isJson:
+    return newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(idx), ex, typ)
+
+  result = quote do:
+    block:
+      var converted: DbValue[`typ`]
+      toQueryHook(converted, `ex`)
+      if converted.isNull:
+        bindNullParam(db, `prepStmt`, `idx`)
+      else:
+        bindParam(db, `prepStmt`, `idx`, converted.value, `typ`)
+
+proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
+  result = quote do:
+      var rawValue: DbValue[`sourceType`]
+      bindResult(db, `prepStmt`, `idx`, rawValue, `sourceType`, `colName`)
+      `destExpr`.fromQueryHook(rawValue)
+
+proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; singleRow: bool): NimNode =
+  let selectedCount = newLit(q.retType.len)
+
+  let mapped = genSym(nskVar, "mapped")
+  let mappedStmt = newStmtList()
+  mappedStmt.add quote do:
+    var `mapped` = `retType`()
+  for idx, name in q.retNames:
+    let fieldName = ident(name)
+    let sourceType = q.retType[idx][1]
+    let destExpr = quote do:
+      `mapped`.`fieldName`
+    let hooked = buildHookedResultAssign(prepStmt, destExpr, retType, sourceType, idx, name)
+    mappedStmt.add quote do:
+      when compiles(`mapped`.`fieldName`):
+        `hooked`
+  if singleRow:
+    mappedStmt.add quote do:
+      `res` = `mapped`
+  else:
+    mappedStmt.add quote do:
+      `res`.add(`mapped`)
+
+  let scalarStmt = newStmtList()
+  let mappedScalar = if singleRow: res else: genSym(nskVar, "mapped")
+  let sourceType = q.retType[0][1]
+  if not singleRow:
+    scalarStmt.add quote do:
+      var `mappedScalar`: `retType`
+  scalarStmt.add buildHookedResultAssign(prepStmt, mappedScalar, retType, sourceType, 0, q.retNames[0])
+  if not singleRow:
+    scalarStmt.add quote do:
+      `res`.add(`mappedScalar`)
+
+  result = quote do:
+    block:
+      when `retType` is object or `retType` is ref object:
+        `mappedStmt`
+      else:
+        when `selectedCount` != 1:
+          {.error: "query(T): scalar mapping expects exactly one selected column".}
+        else:
+          `scalarStmt`
 
 proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimNode =
   expectKind body, nnkStmtList
@@ -1537,8 +1597,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   if q.params.len > 0:
     blk.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
     for p in q.params:
-      let fn = if p.isJson: bindSym"bindParamJson" else: bindSym"bindParam"
-      blk.add newCall(fn, ident"db", prepStmt, newLit(i), p.ex, p.typ)
+      blk.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, p.isJson)
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
   var body = newStmtList()
@@ -1631,17 +1690,113 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   if q.retType.len > 0:
     result.add res
 
-macro query*(body: untyped): untyped =
-  var q = newQueryBuilder()
-  result = queryImpl(q, body, false, false)
-  when defined(debugOrminDsl):
-    macros.hint("Ormin Query: " & repr(result), body)
+proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNode): NimNode =
+  expectKind body, nnkStmtList
+  expectMinLen body, 1
 
-macro tryQuery*(body: untyped): untyped =
+  q.retTypeIsJson = false
+  applyQueryNode(body, q)
+  if q.kind notin {qkSelect, qkJoin}:
+    macros.error "query(T) currently supports select/join queries only", body
+  if q.retType.len == 0:
+    macros.error "query(T) requires a query that returns data", body
+  if q.retTypeIsJson:
+    macros.error "query(T) does not support 'produce json'", body
+
+  let sql = queryAsString(q, body)
+  let prepStmt = genSym(nskLet)
+  let res = genSym(nskVar)
+  result = newTree(
+    nnkStmtListExpr,
+    newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
+  )
+  if q.singleRow:
+    result.add newTree(nnkVarSection, newIdentDefs(res, copyNimTree(retType), newEmptyNode()))
+  else:
+    result.add newTree(nnkVarSection, newIdentDefs(res,
+      newTree(nnkBracketExpr, bindSym"seq", copyNimTree(retType)),
+      newTree(nnkPrefix, bindSym"@", newTree(nnkBracket))))
+
+  let blk = newStmtList()
+  var i = 1
+  if q.params.len > 0:
+    blk.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
+    for p in q.params:
+      blk.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, p.isJson)
+      inc i
+  blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
+
+  let action = buildQueryHookAction(q, prepStmt, res, retType, q.singleRow)
+
+  if q.singleRow:
+    if attempt:
+      blk.add newTree(nnkIfStmt,
+        newTree(nnkElifBranch,
+          newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true),
+          action
+        )
+      )
+      blk.add newCall(bindSym"stopQuery", ident"db", prepStmt)
+    else:
+      blk.add newTree(nnkIfStmt,
+        newTree(nnkElifBranch,
+          newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true),
+          newStmtList(action, newCall(bindSym"stopQuery", ident"db", prepStmt))
+        ),
+        newTree(nnkElse,
+          newStmtList(
+            newCall(bindSym"stopQuery", ident"db", prepStmt),
+            newCall(bindSym"dbError", ident"db")
+          )
+        )
+      )
+  else:
+    blk.add newTree(nnkWhileStmt,
+      newCall(bindSym"stepQuery", ident"db", prepStmt, newLit true),
+      action
+    )
+    blk.add newCall(bindSym"stopQuery", ident"db", prepStmt)
+
+  result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
+  result.add res
+
+macro query*(args: varargs[untyped]): untyped =
+  if args.len == 1:
+    let body = args[0]
+    var q = newQueryBuilder()
+    result = queryImpl(q, body, false, false)
+    when defined(debugOrminDsl):
+      macros.hint("Ormin Query: " & repr(result), body)
+    return
+
+  if args.len != 2:
+    macros.error("query expects either `query: ...` or `query(T): ...`", args)
+
+  let retType = args[0]
+  let body = args[1]
   var q = newQueryBuilder()
-  result = queryImpl(q, body, true, false)
+  result = queryHookImpl(q, body, false, retType)
   when defined(debugOrminDsl):
-    macros.hint("Ormin Query: " & repr(result), body)
+    macros.hint("Ormin Query(T): " & repr(result), body)
+
+macro tryQuery*(args: varargs[untyped]): untyped =
+  if args.len == 1:
+    let body = args[0]
+    var q = newQueryBuilder()
+    result = queryImpl(q, body, true, false)
+    when defined(debugOrminDsl):
+      macros.hint("Ormin TryQuery: " & repr(result), body)
+    return
+
+  if args.len != 2:
+    macros.error("tryQuery expects either `tryQuery: ...` or `tryQuery(T): ...`", args)
+
+  let retType = args[0]
+  let body = args[1]
+  var q = newQueryBuilder()
+  result = queryHookImpl(q, body, true, retType)
+  when defined(debugOrminDsl):
+    macros.hint("Ormin TryQuery(T): " & repr(result), body)
 
 # -------------------------
 # Transactions DSL

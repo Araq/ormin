@@ -1,6 +1,7 @@
 import strutils, db_connector/postgres, json, times
 
 import db_connector/db_common
+import query_hooks
 export db_common
 
 type
@@ -61,6 +62,9 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
 template bindParamUnchecked(db: DbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
   pparams[idx-1] = $x
   parr[idx-1] = cstring(pparams[idx-1])
+
+template bindNullParam*(db: DbConn; s: PStmt; idx: int) =
+  parr[idx-1] = cstring(nil)
 
 template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
                         t: typedesc) =
@@ -129,9 +133,15 @@ proc fillString(dest: var string; src: cstring; srcLen: int) {.inline.} =
     
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
-  let src = pqgetvalue(queryResult, queryI, idx.cint)
-  let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
-  fillString(dest, src, srcLen)
+  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
+    when defined(nimNoNilSeqs):
+      setLen(dest, 0)
+    else:
+      dest = nil
+  else:
+    let src = pqgetvalue(queryResult, queryI, idx.cint)
+    let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
+    fillString(dest, src, srcLen)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: float64;
                      t: typedesc; name: string) =
@@ -162,6 +172,19 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: JsonNode;
                      t: typedesc; name: string) =
   dest = parseJson($pqgetvalue(queryResult, queryI, idx.cint))
 
+template bindResult*[T](db: DbConn; s: PStmt; idx: int; dest: var DbValue[T];
+                        t: typedesc; name: string) =
+  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
+    dest.isNull = true
+  else:
+    dest.isNull = false
+    when T is string:
+      let src = pqgetvalue(queryResult, queryI, idx.cint)
+      let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
+      fillString(dest.value, src, srcLen)
+    else:
+      bindResult(db, s, idx, dest.value, t, name)
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -173,6 +196,9 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     bindToJson(db, s, idx, x, t, name)
+
+template columnIsNull*(db: DbConn; s: PStmt; idx: int): bool =
+  pqgetisnull(queryResult, queryI, idx.cint) != 0
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc; name: string) =

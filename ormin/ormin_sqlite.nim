@@ -5,6 +5,7 @@ import json, times
 
 import db_connector/db_common
 import db_connector/sqlite3
+import query_hooks
 export db_common
 
 type
@@ -45,12 +46,12 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
         cast[pointer](nil)
       else:
         cast[pointer](unsafeAddr(xs[0]))
-    if bind_blob(s, idx.cint, blobPtr, xs.len.cint, SQLITE_STATIC) != SQLITE_OK:
+    if bind_blob(s, idx.cint, blobPtr, xs.len.cint, SQLITE_TRANSIENT) != SQLITE_OK:
       dbError(db)
   elif t is int or t is int64 or t is bool:
     if bind_int64(s, idx.cint, x.int64) != SQLITE_OK: dbError(db)
   elif t is string:
-    if bind_text(s, idx.cint, cstring(x), x.len.cint, SQLITE_STATIC) != SQLITE_OK:
+    if bind_text(s, idx.cint, cstring(x), x.len.cint, SQLITE_TRANSIENT) != SQLITE_OK:
       dbError(db)
   elif t is float64:
     if bind_double(s, idx.cint, x) != SQLITE_OK:
@@ -61,14 +62,18 @@ template bindParam*(db: DbConn; s: PStmt; idx: int; x, t: untyped) =
     else:
       x.utc().format("yyyy-MM-dd HH:mm:ss")
 
-    if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_STATIC) != SQLITE_OK:
+    if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_TRANSIENT) != SQLITE_OK:
       dbError(db)
   elif t is JsonNode:
     let xx = $x
-    if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_STATIC) != SQLITE_OK:
+    if bind_text(s, idx.cint, cstring(xx), xx.len.cint, SQLITE_TRANSIENT) != SQLITE_OK:
       dbError(db)
   else:
     {.error: "type mismatch for query argument at position " & $idx.}
+
+template bindNullParam*(db: DbConn; s: PStmt; idx: int) =
+  if bind_null(s, idx.cint) != SQLITE_OK:
+    dbError(db)
 
 template bindParamJson*(db: DbConn; s: PStmt; idx: int; xx: JsonNode;
                         t: typedesc) =
@@ -86,7 +91,7 @@ template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
                        t: typedesc[string]) =
   doAssert x.kind == JString
   let xs = x.str
-  if bind_text(s, idx.cint, cstring(xs), xs.len.cint, SQLITE_STATIC) != SQLITE_OK:
+  if bind_text(s, idx.cint, cstring(xs), xs.len.cint, SQLITE_TRANSIENT) != SQLITE_OK:
     dbError(db)
 
 template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
@@ -118,7 +123,7 @@ template bindFromJson*(db: DbConn; s: PStmt; idx: int; x: JsonNode;
       dtStr[0 ..< i]
     else:
       dtStr
-  if bind_text(s, idx.cint, cstring(dt), dt.len.cint, SQLITE_STATIC) != SQLITE_OK:
+  if bind_text(s, idx.cint, cstring(dt), dt.len.cint, SQLITE_TRANSIENT) != SQLITE_OK:
     dbError(db)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: int;
@@ -149,9 +154,15 @@ proc fillBytes(dest: var seq[byte]; src: pointer; srcLen: int) =
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var string;
                      t: typedesc; name: string) =
-  let srcLen = column_bytes(s, idx.cint)
-  let src = column_text(s, idx.cint)
-  fillString(dest, src, srcLen)
+  if column_type(s, idx.cint) == SQLITE_NULL:
+    when defined(nimNoNilSeqs):
+      setLen(dest, 0)
+    else:
+      dest = nil
+  else:
+    let srcLen = column_bytes(s, idx.cint)
+    let src = column_text(s, idx.cint)
+    fillString(dest, src, srcLen)
 
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var blobType;
                      t: typedesc; name: string) =
@@ -182,6 +193,19 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: JsonNode;
   let src = column_text(s, idx.cint)
   dest = parseJson($src)
 
+template bindResult*[T](db: DbConn; s: PStmt; idx: int; dest: var DbValue[T];
+                        t: typedesc; name: string) =
+  if column_type(s, idx.cint) == SQLITE_NULL:
+    dest.isNull = true
+  else:
+    dest.isNull = false
+    when T is string:
+      let srcLen = column_bytes(s, idx.cint)
+      let src = column_text(s, idx.cint)
+      fillString(dest.value, src, srcLen)
+    else:
+      bindResult(db, s, idx, dest.value, t, name)
+
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()
 
@@ -193,6 +217,9 @@ template bindResultJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
     x[name] = newJNull()
   else:
     bindToJson(db, s, idx, x, t, name)
+
+template columnIsNull*(db: DbConn; s: PStmt; idx: int): bool =
+  column_type(s, idx.cint) == SQLITE_NULL
 
 template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
                      t: typedesc; name: string) =

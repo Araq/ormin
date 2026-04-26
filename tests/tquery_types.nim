@@ -57,14 +57,14 @@ const
   benchmarkRounds = 5
   maxTypedQuerySlowdown = 1.20
 
-proc fromQueryHook*(tp: typedesc[MessageSize], value: string): MessageSize =
-  MessageSize(value.len)
+proc fromQueryHook*(val: var MessageSize, value: string) =
+  val = MessageSize(value.len)
 
-proc fromQueryHook*(tp: typedesc[NullFallbackNote], value: DbValue[string]): NullFallbackNote =
+proc fromQueryHook*(val: var NullFallbackNote, value: DbValue[string]) =
   if value.isNull:
-    NullFallbackNote("<missing>")
+    val = NullFallbackNote("<missing>")
   else:
-    NullFallbackNote("note:" & value.value)
+    val = NullFallbackNote("note:" & value.value)
 
 proc loadBenchmarkRows() =
   db.dropTable(sqlFile, "tb_composite_pk")

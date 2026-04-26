@@ -1503,7 +1503,6 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
   if isJson:
     return newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(idx), ex, typ)
 
-  let converted = genSym(nskVar, "queryParam")
   result = quote do:
     block:
       var converted: DbValue[`typ`]

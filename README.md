@@ -288,8 +288,8 @@ type
     id: int
     title: TitleLength
 
-proc fromQueryHook*(tp: typedesc[TitleLength], value: string): TitleLength =
-  TitleLength(value.len)
+proc fromQueryHook*(val: var TitleLength, value: string) =
+  val = TitleLength(value.len)
 
 let rows = query(ThreadTitleSize):
   select thread(id, name as title)
@@ -301,11 +301,11 @@ If a hook needs to handle SQL `NULL` itself, accept a `DbValue[SourceType]`:
 type
   NullableTitle = distinct string
 
-proc fromQueryHook*(tp: typedesc[NullableTitle], value: DbValue[string]): NullableTitle =
+proc fromQueryHook*(val: var NullableTitle, value: DbValue[string]) =
   if value.isNull:
-    NullableTitle("<untitled>")
+    val = NullableTitle("<untitled>")
   else:
-    NullableTitle(value.value)
+    val = NullableTitle(value.value)
 ```
 
 These are column deserialization hooks. In object typed queries, Ormin calls `fromQueryHook` separately for each selected column that maps to a destination field; it does not currently call a hook for the entire row object. For whole-row transformations, query into an intermediate typed result and convert it in regular Nim code.

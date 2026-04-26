@@ -1530,10 +1530,12 @@ proc addQueryHookResult(stmts: NimNode; singleRow: bool; res, mapped: NimNode) =
     stmts.add quote do:
       `res`.add(`mapped`)
 
-proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
-  result = newStmtList()
+proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; singleRow: bool): NimNode =
+  let selectedCount = newLit(q.retType.len)
+
   let mapped = genSym(nskVar, "mapped")
-  result.add quote do:
+  let mappedStmt = newStmtList()
+  mappedStmt.add quote do:
     var `mapped` = `retType`()
   for idx, name in q.retNames:
     let fieldName = ident(name)
@@ -1541,32 +1543,25 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: b
     let destExpr = quote do:
       `mapped`.`fieldName`
     let hooked = buildHookedResultAssign(prepStmt, destExpr, retType, sourceType, idx, name)
-    result.add quote do:
+    mappedStmt.add quote do:
       when compiles(`mapped`.`fieldName`):
         `hooked`
-  result.addQueryHookResult(singleRow, res, mapped)
+  mappedStmt.addQueryHookResult(singleRow, res, mapped)
 
-proc buildQueryHookScalarAssign(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
-  result = newStmtList()
-  let mapped = if singleRow: res else: genSym(nskVar, "mapped")
+  let scalarStmt = newStmtList()
+  let mappedScalar = if singleRow: res else: genSym(nskVar, "mapped")
   let sourceType = q.retType[0][1]
-
   if not singleRow:
-    result.add quote do:
-      var `mapped`: `retType`
-  result.add buildHookedResultAssign(prepStmt, mapped, retType, sourceType, 0, q.retNames[0])
+    scalarStmt.add quote do:
+      var `mappedScalar`: `retType`
+  scalarStmt.add buildHookedResultAssign(prepStmt, mappedScalar, retType, sourceType, 0, q.retNames[0])
   if not singleRow:
-    result.addQueryHookResult(singleRow, res, mapped)
-
-proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; singleRow: bool): NimNode =
-  let selectedCount = newLit(q.retType.len)
-  let mappedObjectStmt = buildQueryHookFieldAssigns(q, prepStmt, singleRow, res, retType)
-  let scalarStmt = buildQueryHookScalarAssign(q, prepStmt, singleRow, res, retType)
+    scalarStmt.addQueryHookResult(singleRow, res, mappedScalar)
 
   result = quote do:
     block:
       when `retType` is object or `retType` is ref object:
-        `mappedObjectStmt`
+        `mappedStmt`
       else:
         when `selectedCount` != 1:
           {.error: "query(T): scalar mapping expects exactly one selected column".}

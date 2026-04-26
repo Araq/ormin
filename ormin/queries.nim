@@ -1543,26 +1543,23 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: b
     result.add quote do:
       `res`.add(`mapped`)
 
-import std/typetraits
-export typetraits
+proc buildQueryHookScalarAssign(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
+  result = newStmtList()
+  let sourceType = q.retType[0][1]
+  if singleRow:
+    result.add buildHookedResultAssign(prepStmt, res, retType, sourceType, 0, q.retNames[0])
+  else:
+    let mapped = genSym(nskVar, "mapped")
+    result.add quote do:
+      var `mapped`: `retType`
+    result.add buildHookedResultAssign(prepStmt, mapped, retType, sourceType, 0, q.retNames[0])
+    result.add quote do:
+      `res`.add(`mapped`)
 
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
-  let scalarMapped = genSym(nskVar, "mapped")
   let selectedCount = newLit(q.retType.len)
-  let mappedObjectStmt = newStmtList(
-    buildQueryHookFieldAssigns(q, prepStmt, singleRow, res, retType),
-  )
-  let scalarStmt =
-    if singleRow:
-      newStmtList(buildHookedResultAssign(prepStmt, res, retType, q.retType[0][1], 0, q.retNames[0]))
-    else:
-      newStmtList(
-        quote do:
-          var `scalarMapped`: `retType`
-        ,
-        buildHookedResultAssign(prepStmt, scalarMapped, retType, q.retType[0][1], 0, q.retNames[0]),
-        newCall(bindSym"add", res, scalarMapped)
-      )
+  let mappedObjectStmt = buildQueryHookFieldAssigns(q, prepStmt, singleRow, res, retType)
+  let scalarStmt = buildQueryHookScalarAssign(q, prepStmt, singleRow, res, retType)
 
   result = quote do:
     block:

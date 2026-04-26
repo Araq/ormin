@@ -1521,7 +1521,7 @@ proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; 
       else:
         rawValue.isNull = false
         bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `colName`)
-      `destExpr` = fromQueryHook(`destType`, rawValue)
+      `destExpr`.fromQueryHook(rawValue)
 
 proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
   result = newStmtList()
@@ -1531,15 +1531,12 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: b
   for idx, name in q.retNames:
     let fieldName = ident(name)
     let sourceType = q.retType[idx][1]
+    let destExpr = quote do:
+      `mapped`.`fieldName`
+    let hooked = buildHookedResultAssign(prepStmt, destExpr, retType, sourceType, idx, name)
     result.add quote do:
       when compiles(`mapped`.`fieldName`):
-          var rawValue: DbValue[`sourceType`]
-          if columnIsNull(db, `prepStmt`, `idx`):
-            rawValue.isNull = true
-          else:
-            rawValue.isNull = false
-            bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `name`)
-          bindFromQueryHook(`mapped`.`fieldName`, rawValue)
+        `hooked`
   if singleRow:
     result.add quote do:
       `res` = `mapped`

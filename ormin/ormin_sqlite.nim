@@ -5,6 +5,7 @@ import json, times
 
 import db_connector/db_common
 import db_connector/sqlite3
+import query_hooks
 export db_common
 
 type
@@ -191,6 +192,19 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: JsonNode;
                      t: typedesc; name: string) =
   let src = column_text(s, idx.cint)
   dest = parseJson($src)
+
+template bindResult*[T](db: DbConn; s: PStmt; idx: int; dest: var DbValue[T];
+                        t: typedesc; name: string) =
+  if column_type(s, idx.cint) == SQLITE_NULL:
+    dest.isNull = true
+  else:
+    dest.isNull = false
+    when T is string:
+      let srcLen = column_bytes(s, idx.cint)
+      let src = column_text(s, idx.cint)
+      fillString(dest.value, src, srcLen)
+    else:
+      bindResult(db, s, idx, dest.value, t, name)
 
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()

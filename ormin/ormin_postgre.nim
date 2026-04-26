@@ -1,6 +1,7 @@
 import strutils, db_connector/postgres, json, times
 
 import db_connector/db_common
+import query_hooks
 export db_common
 
 type
@@ -170,6 +171,19 @@ template bindResult*(db: DbConn; s: PStmt; idx: int; dest: var DateTime;
 template bindResult*(db: DbConn; s: PStmt; idx: int; dest: JsonNode;
                      t: typedesc; name: string) =
   dest = parseJson($pqgetvalue(queryResult, queryI, idx.cint))
+
+template bindResult*[T](db: DbConn; s: PStmt; idx: int; dest: var DbValue[T];
+                        t: typedesc; name: string) =
+  if pqgetisnull(queryResult, queryI, idx.cint) != 0:
+    dest.isNull = true
+  else:
+    dest.isNull = false
+    when T is string:
+      let src = pqgetvalue(queryResult, queryI, idx.cint)
+      let srcLen = int(pqgetlength(queryResult, queryI, idx.cint))
+      fillString(dest.value, src, srcLen)
+    else:
+      bindResult(db, s, idx, dest.value, t, name)
 
 template createJObject*(): untyped = newJObject()
 template createJArray*(): untyped = newJArray()

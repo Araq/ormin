@@ -1515,11 +1515,7 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
 proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; idx: int; colName: string): NimNode =
   result = quote do:
       var rawValue: DbValue[`sourceType`]
-      if columnIsNull(db, `prepStmt`, `idx`):
-        rawValue.isNull = true
-      else:
-        rawValue.isNull = false
-        bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `colName`)
+      bindResult(db, `prepStmt`, `idx`, rawValue, `sourceType`, `colName`)
       `destExpr`.fromQueryHook(rawValue)
 
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; singleRow: bool): NimNode =

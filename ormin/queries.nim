@@ -1522,14 +1522,6 @@ proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; 
         bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `colName`)
       `destExpr`.fromQueryHook(rawValue)
 
-proc addQueryHookResult(stmts: NimNode; singleRow: bool; res, mapped: NimNode) =
-  if singleRow:
-    stmts.add quote do:
-      `res` = `mapped`
-  else:
-    stmts.add quote do:
-      `res`.add(`mapped`)
-
 proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; singleRow: bool): NimNode =
   let selectedCount = newLit(q.retType.len)
 
@@ -1546,7 +1538,12 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; sing
     mappedStmt.add quote do:
       when compiles(`mapped`.`fieldName`):
         `hooked`
-  mappedStmt.addQueryHookResult(singleRow, res, mapped)
+  if singleRow:
+    mappedStmt.add quote do:
+      `res` = `mapped`
+  else:
+    mappedStmt.add quote do:
+      `res`.add(`mapped`)
 
   let scalarStmt = newStmtList()
   let mappedScalar = if singleRow: res else: genSym(nskVar, "mapped")
@@ -1556,7 +1553,8 @@ proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; sing
       var `mappedScalar`: `retType`
   scalarStmt.add buildHookedResultAssign(prepStmt, mappedScalar, retType, sourceType, 0, q.retNames[0])
   if not singleRow:
-    scalarStmt.addQueryHookResult(singleRow, res, mappedScalar)
+    scalarStmt.add quote do:
+      `res`.add(`mappedScalar`)
 
   result = quote do:
     block:

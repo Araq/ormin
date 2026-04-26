@@ -1522,6 +1522,14 @@ proc buildHookedResultAssign(prepStmt, destExpr, destType, sourceType: NimNode; 
         bindResult(db, `prepStmt`, `idx`, rawValue.value, `sourceType`, `colName`)
       `destExpr`.fromQueryHook(rawValue)
 
+proc addQueryHookResult(stmts: NimNode; singleRow: bool; res, mapped: NimNode) =
+  if singleRow:
+    stmts.add quote do:
+      `res` = `mapped`
+  else:
+    stmts.add quote do:
+      `res`.add(`mapped`)
+
 proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
   result = newStmtList()
   let mapped = genSym(nskVar, "mapped")
@@ -1536,27 +1544,21 @@ proc buildQueryHookFieldAssigns(q: QueryBuilder; prepStmt: NimNode, singleRow: b
     result.add quote do:
       when compiles(`mapped`.`fieldName`):
         `hooked`
-  if singleRow:
-    result.add quote do:
-      `res` = `mapped`
-  else:
-    result.add quote do:
-      `res`.add(`mapped`)
+  result.addQueryHookResult(singleRow, res, mapped)
 
 proc buildQueryHookScalarAssign(q: QueryBuilder; prepStmt: NimNode, singleRow: bool, res, retType: NimNode): NimNode =
   result = newStmtList()
+  let mapped = if singleRow: res else: genSym(nskVar, "mapped")
   let sourceType = q.retType[0][1]
-  if singleRow:
-    result.add buildHookedResultAssign(prepStmt, res, retType, sourceType, 0, q.retNames[0])
-  else:
-    let mapped = genSym(nskVar, "mapped")
+
+  if not singleRow:
     result.add quote do:
       var `mapped`: `retType`
-    result.add buildHookedResultAssign(prepStmt, mapped, retType, sourceType, 0, q.retNames[0])
-    result.add quote do:
-      `res`.add(`mapped`)
+  result.add buildHookedResultAssign(prepStmt, mapped, retType, sourceType, 0, q.retNames[0])
+  if not singleRow:
+    result.addQueryHookResult(singleRow, res, mapped)
 
-proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType, body: NimNode; singleRow: bool): NimNode =
+proc buildQueryHookAction(q: QueryBuilder; prepStmt, res, retType: NimNode; singleRow: bool): NimNode =
   let selectedCount = newLit(q.retType.len)
   let mappedObjectStmt = buildQueryHookFieldAssigns(q, prepStmt, singleRow, res, retType)
   let scalarStmt = buildQueryHookScalarAssign(q, prepStmt, singleRow, res, retType)
@@ -1735,7 +1737,7 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
       inc i
   blk.add newCall(bindSym"startQuery", ident"db", prepStmt)
 
-  let action = buildQueryHookAction(q, prepStmt, res, retType, body, q.singleRow)
+  let action = buildQueryHookAction(q, prepStmt, res, retType, q.singleRow)
 
   if q.singleRow:
     if attempt:

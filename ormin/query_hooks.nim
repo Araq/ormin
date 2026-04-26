@@ -18,15 +18,15 @@ template toQueryHook*[T, S](val: var T, x: S) =
 proc nullQueryValueError() {.noreturn.} =
   raise newException(ValueError, "cannot map NULL query result")
 
-proc fromQueryHook*[T, S](val: var Option[T], x: DbValue[S]) =
+proc fromQueryHook*[T, S](val: var Option[T], x: var DbValue[S]) =
   if x.isNull:
     val = none(T)
   else:
     var converted: T
-    fromQueryHook(converted, x.value)
+    fromQueryHook(converted, move x.value)
     val = some(converted)
 
-proc fromQueryHook*[T, S](val: var T, x: DbValue[S]) =
+proc fromQueryHook*[T, S](val: var T, x: var DbValue[S]) =
   if x.isNull:
     when T is string:
       val = ""
@@ -35,9 +35,9 @@ proc fromQueryHook*[T, S](val: var T, x: DbValue[S]) =
     else:
       nullQueryValueError()
   else:
-    fromQueryHook(val, x.value)
+    fromQueryHook(val, move x.value)
 
-proc bindFromQueryHook*[T, S](dest: var T, x: DbValue[S]) =
+proc bindFromQueryHook*[T, S](dest: var T, x: var DbValue[S]) =
   fromQueryHook(dest, x)
 
 proc toQueryHook*[S, T](val: var DbValue[S], x: Option[T]) =

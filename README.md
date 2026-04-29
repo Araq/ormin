@@ -241,6 +241,75 @@ let newId = query:
 
 ```
 
+### Typed Queries
+
+Use `query(T):` when you want Ormin to deserialize selected columns directly into a named Nim type instead of returning the default tuple shape. This is useful at module boundaries where a named object, ref object, or scalar domain type is clearer than a tuple.
+
+For object results, selected column names must match fields on the destination type. Use `as` aliases when the database column name differs from the Nim field name:
+
+```nim
+type
+  ThreadSummary = object
+    id: int
+    title: string
+
+let threads = query(ThreadSummary):
+  select thread(id, name as title)
+  orderby id
+```
+
+Selecting one column can map directly to a scalar type:
+
+```nim
+let names = query(string):
+  select thread(name)
+```
+
+Queries that return a single row, such as a `limit 1` query, return one `T` instead of `seq[T]`:
+
+```nim
+let thread = query(ThreadSummary):
+  select thread(id, name as title)
+  where id == ?threadId
+  limit 1
+```
+
+#### `fromQueryHook` Column Hooks
+
+Typed queries deserialize each selected column through `fromQueryHook`. You can overload this hook for your own field or scalar destination types:
+
+```nim
+import ormin/query_hooks
+
+type
+  TitleLength = distinct int
+
+  ThreadTitleSize = object
+    id: int
+    title: TitleLength
+
+proc fromQueryHook*(val: var TitleLength, value: string) =
+  val = TitleLength(value.len)
+
+let rows = query(ThreadTitleSize):
+  select thread(id, name as title)
+```
+
+If a hook needs to handle SQL `NULL` itself, accept a `DbValue[SourceType]`:
+
+```nim
+type
+  NullableTitle = distinct string
+
+proc fromQueryHook*(val: var NullableTitle, value: DbValue[string]) =
+  if value.isNull:
+    val = NullableTitle("<untitled>")
+  else:
+    val = NullableTitle(value.value)
+```
+
+These are column deserialization hooks. In object typed queries, Ormin calls `fromQueryHook` separately for each selected column that maps to a destination field; it does not currently call a hook for the entire row object. For whole-row transformations, query into an intermediate typed result and convert it in regular Nim code.
+
 ### JSON and Raw SQL
 
 JSON values can be spliced directly using `%` expressions. The `%` prefix tells Ormin to treat the following Nim expression as a `JsonNode` without conversion:

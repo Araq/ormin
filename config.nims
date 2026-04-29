@@ -16,6 +16,7 @@ task test, "Run all test suite":
 
   exec "nim c -f -r tests/tfeature"
   exec "nim c -f -r tests/tcommon"
+  exec "nim c -f -r -d:release tests/tquery_types"
   exec "nim c -f -r tests/tsqlite"
   exec "nim c -f -r tests/tdb_utils"
   exec "nim c -f -r tests/timportstatic"
@@ -34,6 +35,7 @@ task test_postgres, "Run PostgreSQL test suite":
 
   exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
   exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
+  exec "nim c -f -d:nimDebugDlOpen -r -d:release -d:postgre tests/tquery_types"
   exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tpostgre"
 
 task buildexamples, "Build examples: chat and forum":

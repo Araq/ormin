@@ -28,6 +28,7 @@ type
   DbColumns* = seq[DbColumn]
 
   KnownTables* = OrderedTable[string, DbColumns]
+  KnownEnums = Table[string, seq[string]]
   ImportTarget* = enum
     postgre, sqlite, mysql
 
@@ -40,13 +41,172 @@ proc hasRefs(colDesc: SqlNode): (string, string) =
   for i in 2 ..< colDesc.len:
     let c = colDesc[i]
     if c.kind == nkReferences:
-      if c[0].kind == nkCall:
-        return (c[0][0].strVal, c[0][1].strVal)
-      elif c[0].kind == nkIdent:
-        return ($c[0], "id")
+      if c[0].kind == nkColumnReference:
+        return (sqlIdentBaseName(c[0][0]), sqlIdentBaseName(c[0][1]))
+      elif c[0].kind == nkCall:
+        return (sqlIdentBaseName(c[0][0]), sqlIdentBaseName(c[0][1]))
+      elif c[0].kind in {nkIdent, nkQuotedIdent, nkDot}:
+        return (sqlIdentBaseName(c[0]), "id")
   ("", "")
 
-proc getType(n: SqlNode): DbType =
+proc isSqlIdentChar(c: char): bool =
+  c in {'a'..'z', 'A'..'Z', '0'..'9', '_', '$'}
+
+proc skipSqlTrivia(sql: string; pos: var int) =
+  var keepReading = true
+  while keepReading and pos < sql.len:
+    keepReading = false
+    while pos < sql.len and sql[pos] in Whitespace:
+      inc pos
+      keepReading = true
+    if pos + 1 < sql.len and sql[pos] == '-' and sql[pos + 1] == '-':
+      inc pos, 2
+      while pos < sql.len and sql[pos] notin {'\c', '\L'}:
+        inc pos
+      keepReading = true
+    elif pos + 1 < sql.len and sql[pos] == '/' and sql[pos + 1] == '*':
+      inc pos, 2
+      while pos + 1 < sql.len and not (sql[pos] == '*' and sql[pos + 1] == '/'):
+        inc pos
+      if pos + 1 < sql.len:
+        inc pos, 2
+      keepReading = true
+
+proc consumeSqlKeyword(sql: string; pos: var int; keyword: string): bool =
+  skipSqlTrivia(sql, pos)
+  let finish = pos + keyword.len
+  if finish > sql.len:
+    return false
+  if cmpIgnoreCase(sql[pos ..< finish], keyword) != 0:
+    return false
+  if finish < sql.len and isSqlIdentChar(sql[finish]):
+    return false
+  pos = finish
+  true
+
+proc readSqlIdentPart(sql: string; pos: var int): string =
+  skipSqlTrivia(sql, pos)
+  if pos >= sql.len:
+    return ""
+
+  if sql[pos] == '"':
+    inc pos
+    while pos < sql.len:
+      if sql[pos] == '"':
+        if pos + 1 < sql.len and sql[pos + 1] == '"':
+          result.add('"')
+          inc pos, 2
+        else:
+          inc pos
+          return
+      else:
+        result.add(sql[pos])
+        inc pos
+  else:
+    while pos < sql.len and isSqlIdentChar(sql[pos]):
+      result.add(sql[pos])
+      inc pos
+
+proc readSqlQualifiedIdent(sql: string; pos: var int): string =
+  result = readSqlIdentPart(sql, pos)
+  if result.len == 0:
+    return
+
+  while true:
+    let beforeDot = pos
+    skipSqlTrivia(sql, pos)
+    if pos >= sql.len or sql[pos] != '.':
+      pos = beforeDot
+      return
+    inc pos
+    let part = readSqlIdentPart(sql, pos)
+    if part.len == 0:
+      return
+    result.add('.')
+    result.add(part)
+
+proc readSqlStringLiteral(sql: string; pos: var int): string =
+  skipSqlTrivia(sql, pos)
+  if pos >= sql.len or sql[pos] != '\'':
+    return ""
+
+  inc pos
+  while pos < sql.len:
+    if sql[pos] == '\'':
+      if pos + 1 < sql.len and sql[pos + 1] == '\'':
+        result.add('\'')
+        inc pos, 2
+      else:
+        inc pos
+        return
+    else:
+      result.add(sql[pos])
+      inc pos
+
+proc readSqlEnumValues(sql: string; pos: var int): seq[string] =
+  skipSqlTrivia(sql, pos)
+  if pos >= sql.len or sql[pos] != '(':
+    return @[]
+  inc pos
+
+  var done = false
+  while not done and pos < sql.len:
+    skipSqlTrivia(sql, pos)
+    if pos < sql.len and sql[pos] == ')':
+      inc pos
+      done = true
+    else:
+      let value = readSqlStringLiteral(sql, pos)
+      if value.len == 0:
+        done = true
+      else:
+        result.add(value)
+        skipSqlTrivia(sql, pos)
+        if pos < sql.len and sql[pos] == ',':
+          inc pos
+        elif pos < sql.len and sql[pos] == ')':
+          inc pos
+          done = true
+        else:
+          done = true
+
+proc registerEnum(enums: var KnownEnums; typeName: string; values: seq[string]) =
+  if typeName.len == 0 or values.len == 0:
+    return
+
+  let normalized = typeName.toLowerAscii
+  enums[normalized] = values
+  let dotPos = normalized.rfind('.')
+  if dotPos >= 0 and dotPos + 1 < normalized.len:
+    enums[normalized[dotPos + 1 .. ^1]] = values
+
+proc collectEnumTypes(schemaSql: string): KnownEnums =
+  result = initTable[string, seq[string]]()
+  let lowerSql = schemaSql.toLowerAscii
+  var searchFrom = 0
+  while searchFrom < lowerSql.len:
+    let found = lowerSql.find("create type", searchFrom)
+    if found < 0:
+      break
+
+    var pos = found
+    if consumeSqlKeyword(schemaSql, pos, "create") and
+        consumeSqlKeyword(schemaSql, pos, "type"):
+      let beforeOptional = pos
+      if consumeSqlKeyword(schemaSql, pos, "if"):
+        if not consumeSqlKeyword(schemaSql, pos, "not") or
+            not consumeSqlKeyword(schemaSql, pos, "exists"):
+          pos = beforeOptional
+
+      let typeName = readSqlQualifiedIdent(schemaSql, pos)
+      if consumeSqlKeyword(schemaSql, pos, "as") and
+          consumeSqlKeyword(schemaSql, pos, "enum"):
+        result.registerEnum(typeName, readSqlEnumValues(schemaSql, pos))
+      searchFrom = max(pos, found + 1)
+    else:
+      searchFrom = found + 1
+
+proc getType(n: SqlNode; enums: KnownEnums): DbType =
   var it = n
   if it.kind == nkCall:
     it = it[0]
@@ -56,21 +216,28 @@ proc getType(n: SqlNode): DbType =
     for i in 0 ..< it.len:
       assert it[i].kind == nkStringLit
       result.validValues.add it[i].strVal
-  elif it.kind in {nkIdent, nkStringLit}:
-    result.kind = dbTypFromName(it.strVal)
-    result.name = it.strVal
+  elif it.kind in {nkIdent, nkQuotedIdent, nkStringLit, nkDot}:
+    let typeName = sqlIdentName(it)
+    let normalized = typeName.toLowerAscii
+    if enums.hasKey(normalized):
+      result.kind = dbEnum
+      result.validValues = enums[normalized]
+    else:
+      let baseName = sqlIdentBaseName(it)
+      result.kind = dbTypFromName(baseName)
+    result.name = typeName
 
-proc collectTables*(n: SqlNode; t: var KnownTables) =
+proc collectTables*(n: SqlNode; t: var KnownTables; enums: KnownEnums) =
   if n.isNil:
     return
   case n.kind
   of nkCreateTable, nkCreateTableIfNotExists:
-    let tableName = n[0].strVal
+    let tableName = sqlIdentBaseName(n[0])
     var cols: DbColumns = @[]
     for i in 1 ..< n.len:
       let it = n[i]
       if it.kind == nkColumnDef:
-        var typ = getType(it[1])
+        var typ = getType(it[1], enums)
         if hasAttribute(it, {nkNotNull}):
           typ.notNull = true
         cols.add DbColumn(
@@ -97,9 +264,9 @@ proc collectTables*(n: SqlNode; t: var KnownTables) =
         var refTable = ""
         var refCols: seq[string] = @[]
         if r.kind == nkColumnReference or r.kind == nkCall:
-          refTable = r[0].strVal
+          refTable = sqlIdentBaseName(r[0])
           for k in 1 ..< r.len:
-            refCols.add(r[k].strVal)
+            refCols.add(sqlIdentBaseName(r[k]))
         let pairCount = min(localCols.len, refCols.len)
         for k in 0 ..< pairCount:
           let localName = localCols[k]
@@ -111,7 +278,7 @@ proc collectTables*(n: SqlNode; t: var KnownTables) =
     t[tableName] = cols
   else:
     for i in 0 ..< n.len:
-      collectTables(n[i], t)
+      collectTables(n[i], t, enums)
 
 proc attrToKey(a: DbColumn; t: KnownTables): int =
   if a.primaryKey:
@@ -128,8 +295,9 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
 proc renderModelCode(schemaSql, schemaPath: string; target: ImportTarget; includeStatic = false): string =
   discard target
   let sql = parseSql(schemaSql, schemaPath)
+  let enums = collectEnumTypes(schemaSql)
   var knownTables = initOrderedTable[string, DbColumns]()
-  collectTables(sql, knownTables)
+  collectTables(sql, knownTables, enums)
 
   result.add FileHeader
   result.add "const tableNames = ["

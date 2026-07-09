@@ -113,12 +113,12 @@ iterator tableDefs(sql: DbSql): tuple[name, tableName, model: string] =
     for i in 0 ..< ast.len:
       let node = ast[i]
       if node.kind in {nkCreateTable, nkCreateTableIfNotExists}:
-        yield (node[0].strVal.toLowerAscii(), $node[0], $node)
+        yield (sqlIdentBaseName(node[0]).toLowerAscii(), sqlIdentName(node[0]), $node)
   else:
     # Fallback: ast might be a single statement (not a list)
     let node = ast
     if node.kind in {nkCreateTable, nkCreateTableIfNotExists}:
-      yield (node[0].strVal.toLowerAscii(), $node[0], $node)
+      yield (sqlIdentBaseName(node[0]).toLowerAscii(), sqlIdentName(node[0]), $node)
 
 iterator tablePairs*(sql: string): tuple[name, model: string] =
   for name, _, model in tableDefs(DbSql(sql)):

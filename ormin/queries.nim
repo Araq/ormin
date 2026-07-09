@@ -229,7 +229,12 @@ proc sourceColumns(q: QueryBuilder; source: int): seq[SourceColumn] {.compileTim
   else:
     for a in attributes:
       if a.tabIndex == source:
-        result.add SourceColumn(name: a.name, typ: DbType(kind: a.typ))
+        var typ = DbType(kind: a.typ)
+        when compiles(a.typeName):
+          typ.name = a.typeName
+        when compiles(a.validValues):
+          typ.validValues = a.validValues
+        result.add SourceColumn(name: a.name, typ: typ)
 
 proc sourceLookup(q: QueryBuilder; table: string): int {.compileTime.} =
   for i, t in tableNames:

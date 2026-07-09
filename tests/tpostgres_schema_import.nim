@@ -79,9 +79,20 @@ let model = generateModelCode(schema, "postgres_schema.sql", postgre)
 
 doAssert model.contains("\"clients\"")
 doAssert model.contains("\"client_resource_grants\"")
-doAssert model.contains("Attr(name: \"id\", tabIndex: 0, typ: dbUuid, key: 1)")
-doAssert model.contains("Attr(name: \"kind\", tabIndex: 0, typ: dbEnum, key: 0)")
-doAssert model.contains("Attr(name: \"metadata\", tabIndex: 0, typ: dbJson, key: 0)")
-doAssert model.contains("Attr(name: \"id\", tabIndex: 1, typ: dbInt, key: 1)")
-doAssert model.contains("Attr(name: \"resource_kind\", tabIndex: 1, typ: dbEnum, key: 0)")
-doAssert model.contains("Attr(name: \"resource_key\", tabIndex: 1, typ: dbVarchar, key: 0)")
+doAssert model.contains("Attr(name: \"id\", tabIndex: 0, typ: dbUuid")
+doAssert model.contains("typeName: \"uuid\", validValues: @[], key: 1")
+doAssert model.contains("Attr(name: \"kind\", tabIndex: 0, typ: dbEnum")
+doAssert model.contains(
+  "typeName: \"public.client_kind\", validValues: @[" &
+    "\"device\", \"internal\", \"partner\"]"
+)
+doAssert model.contains("Attr(name: \"metadata\", tabIndex: 0, typ: dbJson")
+doAssert model.contains("typeName: \"jsonb\", validValues: @[], key: 0")
+doAssert model.contains("Attr(name: \"id\", tabIndex: 1, typ: dbInt")
+doAssert model.contains("typeName: \"bigint\", validValues: @[], key: 1")
+doAssert model.contains("Attr(name: \"resource_kind\", tabIndex: 1, typ: dbEnum")
+doAssert model.contains(
+  "typeName: \"public.resource_kind\", validValues: @[" &
+    "\"platform\", \"organization\", \"device\", \"integration\"]"
+)
+doAssert model.contains("Attr(name: \"resource_key\", tabIndex: 1, typ: dbVarchar")

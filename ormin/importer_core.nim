@@ -13,6 +13,8 @@ type
     name: string
     tabIndex: int
     typ: DbTypekind
+    typeName: string
+    validValues: seq[string]
     key: int   # 0 nothing special,
                # +1 -- primary key
                # -N -- references attribute N
@@ -292,6 +294,14 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
         inc i
   0
 
+proc addStringSeq(dest: var string; values: openArray[string]) =
+  dest.add "@["
+  for i, value in values:
+    if i > 0:
+      dest.add ", "
+    dest.add escape(value)
+  dest.add "]"
+
 proc renderModelCode(schemaSql, schemaPath: string; target: ImportTarget; includeStatic = false): string =
   discard target
   let sql = parseSql(schemaSql, schemaPath)
@@ -326,6 +336,10 @@ proc renderModelCode(schemaSql, schemaPath: string; target: ImportTarget; includ
       result.add $i
       result.add ", typ: "
       result.add $a.typ.kind
+      result.add ", typeName: "
+      result.add escape(a.typ.name)
+      result.add ", validValues: "
+      result.addStringSeq(a.typ.validValues)
       result.add ", key: "
       result.add $attrToKey(a, knownTables)
       result.add ")"

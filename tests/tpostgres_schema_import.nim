@@ -77,8 +77,8 @@ for each row execute function public.set_updated_at();
 let schema = postgresSchema
 let model = generateModelCode(schema, "postgres_schema.sql", postgre)
 
-doAssert model.contains("\"clients\"")
-doAssert model.contains("\"client_resource_grants\"")
+doAssert model.contains("\"public.clients\"")
+doAssert model.contains("\"public.client_resource_grants\"")
 doAssert model.contains("Attr(name: \"id\", tabIndex: 0, typ: dbUuid")
 doAssert model.contains("typeName: \"uuid\", validValues: @[], key: 1")
 doAssert model.contains("Attr(name: \"kind\", tabIndex: 0, typ: dbEnum")
@@ -96,3 +96,39 @@ doAssert model.contains(
     "\"platform\", \"organization\", \"device\", \"integration\"]"
 )
 doAssert model.contains("Attr(name: \"resource_key\", tabIndex: 1, typ: dbVarchar")
+
+block qualifiedTableNamesRemainDistinct:
+  const schemaText = """
+create table public.events (public_value text);
+create table audit.events (audit_value text);
+"""
+  let schema = schemaText
+  let generated = generateModelCode(schema, "qualified.sql", postgre)
+  doAssert generated.contains("\"public.events\"")
+  doAssert generated.contains("\"audit.events\"")
+  doAssert generated.contains("Attr(name: \"public_value\", tabIndex: 0")
+  doAssert generated.contains("Attr(name: \"audit_value\", tabIndex: 1")
+
+block enumKeywordsMayBeSeparatedByWhitespace:
+  const schemaText = """
+create
+type public.mood as enum ('happy', 'sad');
+create table public.people (mood public.mood);
+"""
+  let schema = schemaText
+  let generated = generateModelCode(schema, "enum_whitespace.sql", postgre)
+  doAssert generated.contains("Attr(name: \"mood\", tabIndex: 0, typ: dbEnum")
+  doAssert generated.contains(
+    "typeName: \"public.mood\", validValues: @[\"happy\", \"sad\"]"
+  )
+
+block namedUniqueConstraintImports:
+  const schemaText = """
+create table public.people (
+  email text,
+  constraint people_email_key unique (email)
+);
+"""
+  let schema = schemaText
+  let generated = generateModelCode(schema, "named_unique.sql", postgre)
+  doAssert generated.contains("Attr(name: \"email\", tabIndex: 0, typ: dbVarchar")

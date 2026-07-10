@@ -477,6 +477,7 @@ type
     nkHexStringLit,
     nkIntegerLit,
     nkNumericLit,
+    nkRaw,
     nkPrimaryKey,
     nkForeignKey,
     nkNotNull,
@@ -540,7 +541,7 @@ type
 const
   LiteralNodes = {
     nkIdent, nkQuotedIdent, nkStringLit, nkBitStringLit, nkHexStringLit,
-    nkIntegerLit, nkNumericLit
+    nkIntegerLit, nkNumericLit, nkRaw
   }
 
 type
@@ -677,6 +678,102 @@ proc skipBalancedParens(p: var SqlParser) =
       discard
     if shouldReadNext:
       getTok(p)
+
+proc stripTrailingSqlSpace(sql: var string) =
+  while sql.len > 0 and sql[^1] in Whitespace:
+    sql.setLen(sql.len - 1)
+
+proc addSqlStringLiteral(sql: var string; value: string; prefix = "") =
+  sql.add(prefix)
+  sql.add('\'')
+  sql.add(value.replace("'", "''"))
+  sql.add('\'')
+
+proc addSqlToken(sql: var string; tok: Token) =
+  case tok.kind
+  of tkParLe:
+    sql.add('(')
+  of tkParRi:
+    sql.stripTrailingSqlSpace()
+    sql.add(')')
+  of tkBracketLe:
+    sql.add('[')
+  of tkBracketRi:
+    sql.stripTrailingSqlSpace()
+    sql.add(']')
+  of tkComma:
+    sql.stripTrailingSqlSpace()
+    sql.add(", ")
+  of tkDot, tkColon:
+    sql.stripTrailingSqlSpace()
+    sql.add(tok.literal)
+  of tkOperator:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.add(tok.literal)
+    sql.add(' ')
+  of tkQuotedIdentifier:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.add('"')
+    sql.add(tok.literal.replace("\"", "\"\""))
+    sql.add('"')
+  of tkStringConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.addSqlStringLiteral(tok.literal)
+  of tkEscapeConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    var escaped = tok.literal.replace("\\", "\\\\")
+    escaped = escaped.replace("'", "''")
+    sql.add("E'")
+    sql.add(escaped)
+    sql.add('\'')
+  of tkDollarQuotedConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    var tag = "$ormin$"
+    while tag in tok.literal:
+      tag = tag[0 ..< ^1] & "_or$"
+    sql.add(tag)
+    sql.add(tok.literal)
+    sql.add(tag)
+  of tkBitStringConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.addSqlStringLiteral(tok.literal, "B")
+  of tkHexStringConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.addSqlStringLiteral(tok.literal, "X")
+  of tkEof:
+    discard
+  else:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.add(tok.literal)
+
+proc readBalancedSql(p: var SqlParser): string =
+  if p.tok.kind != tkParLe:
+    return
+
+  var depth = 0
+  while p.tok.kind != tkEof:
+    let kind = p.tok.kind
+    case kind
+    of tkParLe:
+      inc depth
+    of tkParRi:
+      dec depth
+    else:
+      discard
+    result.addSqlToken(p.tok)
+    getTok(p)
+    if kind == tkParRi and depth == 0:
+      return
+
+  sqlError(p, "closing parenthesis expected")
 
 proc parseIdentNode(p: var SqlParser): SqlNode =
   expectIdent(p)
@@ -875,8 +972,7 @@ proc parseCheck(p: var SqlParser): SqlNode =
   getTok(p)
   result = newNode(nkCheck)
   if p.tok.kind == tkParLe:
-    skipBalancedParens(p)
-    result.add(newNode(nkIdent, "true"))
+    result.add(newNode(nkRaw, readBalancedSql(p)))
   else:
     result.add(parseExpr(p))
 
@@ -1175,7 +1271,7 @@ proc parseTableConstraint(p: var SqlParser): SqlNode =
     result.add(m)
   elif isKeyw(p, "unique"):
     getTok(p)
-    eat(p, "key")
+    optKeyw(p, "key")
     result = newNode(nkUnique)
     parseParIdentList(p, result)
   elif isKeyw(p, "check"):
@@ -1622,6 +1718,8 @@ proc ra(n: SqlNode, s: var SqlWriter) =
   of nkHexStringLit:
     s.add("x'" & n.strVal & "'")
   of nkIntegerLit, nkNumericLit:
+    s.add(n.strVal)
+  of nkRaw:
     s.add(n.strVal)
   of nkPrimaryKey:
     s.addKeyw("primary key")

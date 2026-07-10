@@ -44,11 +44,11 @@ proc hasRefs(colDesc: SqlNode): (string, string) =
     let c = colDesc[i]
     if c.kind == nkReferences:
       if c[0].kind == nkColumnReference:
-        return (sqlIdentBaseName(c[0][0]), sqlIdentBaseName(c[0][1]))
+        return (sqlIdentName(c[0][0]), sqlIdentBaseName(c[0][1]))
       elif c[0].kind == nkCall:
-        return (sqlIdentBaseName(c[0][0]), sqlIdentBaseName(c[0][1]))
+        return (sqlIdentName(c[0][0]), sqlIdentBaseName(c[0][1]))
       elif c[0].kind in {nkIdent, nkQuotedIdent, nkDot}:
-        return (sqlIdentBaseName(c[0]), "id")
+        return (sqlIdentName(c[0]), "id")
   ("", "")
 
 proc isSqlIdentChar(c: char): bool =
@@ -127,23 +127,46 @@ proc readSqlQualifiedIdent(sql: string; pos: var int): string =
     result.add('.')
     result.add(part)
 
-proc readSqlStringLiteral(sql: string; pos: var int): string =
+proc readSqlStringLiteral(sql: string; pos: var int; value: var string): bool =
   skipSqlTrivia(sql, pos)
   if pos >= sql.len or sql[pos] != '\'':
-    return ""
+    return false
 
   inc pos
   while pos < sql.len:
     if sql[pos] == '\'':
       if pos + 1 < sql.len and sql[pos + 1] == '\'':
-        result.add('\'')
+        value.add('\'')
         inc pos, 2
       else:
         inc pos
-        return
+        return true
     else:
-      result.add(sql[pos])
+      value.add(sql[pos])
       inc pos
+
+proc readDollarQuotedBody(sql: string; pos: var int; body: var string): bool =
+  if pos >= sql.len or sql[pos] != '$':
+    return false
+
+  let delimiterStart = pos
+  inc pos
+  while pos < sql.len and sql[pos] in {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+    inc pos
+  if pos >= sql.len or sql[pos] != '$':
+    pos = delimiterStart
+    return false
+
+  inc pos
+  let delimiter = sql[delimiterStart ..< pos]
+  let bodyEnd = sql.find(delimiter, pos)
+  if bodyEnd < 0:
+    pos = delimiterStart
+    return false
+
+  body = sql[pos ..< bodyEnd]
+  pos = bodyEnd + delimiter.len
+  true
 
 proc readSqlEnumValues(sql: string; pos: var int): seq[string] =
   skipSqlTrivia(sql, pos)
@@ -158,8 +181,8 @@ proc readSqlEnumValues(sql: string; pos: var int): seq[string] =
       inc pos
       done = true
     else:
-      let value = readSqlStringLiteral(sql, pos)
-      if value.len == 0:
+      var value = ""
+      if not readSqlStringLiteral(sql, pos, value):
         done = true
       else:
         result.add(value)
@@ -182,31 +205,56 @@ proc registerEnum(enums: var KnownEnums; typeName: string; values: seq[string]) 
   if dotPos >= 0 and dotPos + 1 < normalized.len:
     enums[normalized[dotPos + 1 .. ^1]] = values
 
-proc collectEnumTypes(schemaSql: string): KnownEnums =
-  result = initTable[string, seq[string]]()
-  let lowerSql = schemaSql.toLowerAscii
-  var searchFrom = 0
-  while searchFrom < lowerSql.len:
-    let found = lowerSql.find("create type", searchFrom)
-    if found < 0:
+proc collectEnumTypes(schemaSql: string; enums: var KnownEnums) =
+  var pos = 0
+  while pos < schemaSql.len:
+    skipSqlTrivia(schemaSql, pos)
+    if pos >= schemaSql.len:
       break
 
-    var pos = found
-    if consumeSqlKeyword(schemaSql, pos, "create") and
-        consumeSqlKeyword(schemaSql, pos, "type"):
-      let beforeOptional = pos
-      if consumeSqlKeyword(schemaSql, pos, "if"):
-        if not consumeSqlKeyword(schemaSql, pos, "not") or
-            not consumeSqlKeyword(schemaSql, pos, "exists"):
-          pos = beforeOptional
-
-      let typeName = readSqlQualifiedIdent(schemaSql, pos)
-      if consumeSqlKeyword(schemaSql, pos, "as") and
-          consumeSqlKeyword(schemaSql, pos, "enum"):
-        result.registerEnum(typeName, readSqlEnumValues(schemaSql, pos))
-      searchFrom = max(pos, found + 1)
+    case schemaSql[pos]
+    of '\'':
+      var ignored = ""
+      if not readSqlStringLiteral(schemaSql, pos, ignored):
+        inc pos
+    of '"':
+      discard readSqlIdentPart(schemaSql, pos)
+    of '$':
+      var body = ""
+      if readDollarQuotedBody(schemaSql, pos, body):
+        collectEnumTypes(body, enums)
+      else:
+        inc pos
     else:
-      searchFrom = found + 1
+      if schemaSql[pos] notin {'a'..'z', 'A'..'Z', '_'}:
+        inc pos
+        continue
+
+      let wordStart = pos
+      while pos < schemaSql.len and isSqlIdentChar(schemaSql[pos]):
+        inc pos
+      if cmpIgnoreCase(schemaSql[wordStart ..< pos], "create") != 0:
+        continue
+
+      var declarationPos = pos
+      if not consumeSqlKeyword(schemaSql, declarationPos, "type"):
+        continue
+
+      let beforeOptional = declarationPos
+      if consumeSqlKeyword(schemaSql, declarationPos, "if"):
+        if not consumeSqlKeyword(schemaSql, declarationPos, "not") or
+            not consumeSqlKeyword(schemaSql, declarationPos, "exists"):
+          declarationPos = beforeOptional
+
+      let typeName = readSqlQualifiedIdent(schemaSql, declarationPos)
+      if consumeSqlKeyword(schemaSql, declarationPos, "as") and
+          consumeSqlKeyword(schemaSql, declarationPos, "enum"):
+        enums.registerEnum(typeName, readSqlEnumValues(schemaSql, declarationPos))
+      pos = max(pos, declarationPos)
+
+proc collectEnumTypes(schemaSql: string): KnownEnums =
+  result = initTable[string, seq[string]]()
+  collectEnumTypes(schemaSql, result)
 
 proc getType(n: SqlNode; enums: KnownEnums): DbType =
   var it = n
@@ -234,7 +282,7 @@ proc collectTables*(n: SqlNode; t: var KnownTables; enums: KnownEnums) =
     return
   case n.kind
   of nkCreateTable, nkCreateTableIfNotExists:
-    let tableName = sqlIdentBaseName(n[0])
+    let tableName = sqlIdentName(n[0])
     var cols: DbColumns = @[]
     for i in 1 ..< n.len:
       let it = n[i]
@@ -266,7 +314,7 @@ proc collectTables*(n: SqlNode; t: var KnownTables; enums: KnownEnums) =
         var refTable = ""
         var refCols: seq[string] = @[]
         if r.kind == nkColumnReference or r.kind == nkCall:
-          refTable = sqlIdentBaseName(r[0])
+          refTable = sqlIdentName(r[0])
           for k in 1 ..< r.len:
             refCols.add(sqlIdentBaseName(r[k]))
         let pairCount = min(localCols.len, refCols.len)
@@ -286,10 +334,30 @@ proc attrToKey(a: DbColumn; t: KnownTables): int =
   if a.primaryKey:
     return 1
   if a.refs[0].len > 0:
+    var referencedTable = ""
+    for tableName in keys(t):
+      if cmpIgnoreCase(tableName, a.refs[0]) == 0:
+        referencedTable = tableName
+        break
+
+    if referencedTable.len == 0 and '.' notin a.refs[0]:
+      for tableName in keys(t):
+        let dotPos = tableName.rfind('.')
+        let baseName =
+          if dotPos >= 0: tableName[dotPos + 1 .. ^1]
+          else: tableName
+        if cmpIgnoreCase(baseName, a.refs[0]) == 0:
+          if referencedTable.len > 0:
+            return 0
+          referencedTable = tableName
+
+    if referencedTable.len == 0:
+      return 0
+
     var i = 0
     for k, v in pairs(t):
       for b in v:
-        if cmpIgnoreCase(k, a.refs[0]) == 0 and cmpIgnoreCase(b.name, a.refs[1]) == 0:
+        if cmpIgnoreCase(k, referencedTable) == 0 and cmpIgnoreCase(b.name, a.refs[1]) == 0:
           return -i - 1
         inc i
   0

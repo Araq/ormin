@@ -217,6 +217,13 @@ proc lookupCte(ctes: openArray[CteDef]; name: string): int {.compileTime.} =
     if cmpIgnoreCase(cte.name, name) == 0:
       return i
 
+proc baseTableName(name: string): string {.compileTime.} =
+  let dotPos = name.rfind('.')
+  if dotPos >= 0:
+    result = name[dotPos + 1 .. ^1]
+  else:
+    result = name
+
 proc sourceName(q: QueryBuilder; source: int): string {.compileTime.} =
   if isCteEnvIndex(source):
     result = q.ctes[fromCteEnvIndex(source)].name
@@ -240,10 +247,27 @@ proc sourceLookup(q: QueryBuilder; table: string): int {.compileTime.} =
   for i, t in tableNames:
     if cmpIgnoreCase(t, table) == 0:
       return i
+
   let cteIdx = lookupCte(q.ctes, table)
   if cteIdx >= 0:
     return cteEnvIndex(cteIdx)
+
+  var baseMatch = -1
+  if '.' notin table:
+    for i, t in tableNames:
+      if cmpIgnoreCase(baseTableName(t), table) == 0:
+        if baseMatch >= 0:
+          return -1
+        baseMatch = i
+  if baseMatch >= 0:
+    return baseMatch
   result = -1
+
+proc sourceMatches(q: QueryBuilder; source: int; table: string): bool {.compileTime.} =
+  let name = sourceName(q, source)
+  result = cmpIgnoreCase(name, table) == 0
+  if not result and not isCteEnvIndex(source) and '.' notin table:
+    result = cmpIgnoreCase(baseTableName(name), table) == 0
 
 proc sourceAlias(q: QueryBuilder; source: int; sourceName: string): string {.compileTime.} =
   if q.kind == qkJoin and q.env.len > 0 and q.env[^1][0] == source:
@@ -275,7 +299,7 @@ proc lookup(table, attr: string; qb: QueryBuilder; alias: var string): DbType =
   var found = false
   var foundSource = -1
   for e in qb.env:
-    if table.len == 0 or cmpIgnoreCase(sourceName(qb, e[0]), table) == 0:
+    if table.len == 0 or sourceMatches(qb, e[0], table):
       for col in sourceColumns(qb, e[0]):
         if cmpIgnoreCase(col.name, attr) == 0:
           if found:
@@ -364,6 +388,12 @@ proc nodeName(n: NimNode): string {.compileTime.} =
       result = nodeName(n[0])
     else:
       result = ""
+  of nnkDotExpr:
+    if n.len == 2:
+      let left = nodeName(n[0])
+      let right = nodeName(n[1])
+      if left.len > 0 and right.len > 0:
+        result = left & "." & right
   else:
     result = ""
 
@@ -511,8 +541,8 @@ proc cond(n: NimNode; q: var string; params: var Params;
     else:
       result = lookupColumnInEnv(n, q, params, expected, qb)
   of nnkDotExpr:
-    let t = $n[0]
-    let a = $n[1]
+    let t = nodeName(n[0])
+    let a = nodeName(n[1])
     escIdent(q, t)
     q.add '.'
     escIdent(q, a)
@@ -927,7 +957,7 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
 proc tableSel(n: NimNode; q: QueryBuilder) =
   if n.kind == nnkCall and q.kind != qkDelete:
     let call = n
-    let tab = $call[0]
+    let tab = nodeName(call[0])
     let tabIndex = sourceLookup(q, tab)
     if tabIndex < 0:
       macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
@@ -1014,8 +1044,8 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
       else:
         macros.error "unknown selector: " & repr(n), n
     if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
-  elif n.kind in {nnkIdent, nnkAccQuoted, nnkSym} and q.kind == qkDelete:
-    let tab = $n
+  elif n.kind in {nnkIdent, nnkAccQuoted, nnkSym, nnkDotExpr} and q.kind == qkDelete:
+    let tab = nodeName(n)
     let tabIndex = sourceLookup(q, tab)
     if tabIndex < 0:
       macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
@@ -1142,7 +1172,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
     if joinClause.kind == nnkCommand and joinClause.len == 2 and
        joinClause[1].kind == nnkCommand and joinClause[1].len == 2 and $joinClause[1][0] == "on" and
        joinClause[0].kind == nnkCall:
-      let tab = $joinClause[0][0]
+      let tab = nodeName(joinClause[0][0])
       let tabIndex = sourceLookup(q, tab)
       if tabIndex < 0:
         macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n
@@ -1163,7 +1193,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
         swap q.env, oldEnv
         checkBool(t, onn)
     elif joinClause.kind == nnkCall:
-      let tab = $joinClause[0]
+      let tab = nodeName(joinClause[0])
       let tabIndex = sourceLookup(q, tab)
       if tabIndex < 0:
         macros.error "unknown table name: " & tab & " from: " & fmtTableList(tableNames), n[1][0]

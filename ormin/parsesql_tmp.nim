@@ -2043,3 +2043,32 @@ proc parseSql*(input: string, filename = "", considerTypeParams = false): SqlNod
   ## `filename` is only used for error messages.
   ## Syntax errors raise an `SqlParseError` exception.
   parseSql(newStringStream(input), "", considerTypeParams)
+
+proc scanEnumTypeDefs(input, filename: string; definitions: SqlNode) =
+  var p: SqlParser
+  open(p, newStringStream(input), filename)
+  try:
+    while p.tok.kind != tkEof:
+      if p.tok.kind == tkDollarQuotedConstant:
+        let body = p.tok.literal
+        getTok(p)
+        scanEnumTypeDefs(body, filename, definitions)
+      elif isKeyw(p, "create"):
+        getTok(p)
+        if isKeyw(p, "type"):
+          let definition = parseIfNotExists(p, nkCreateType)
+          definition.add(parseQualifiedIdentifier(p))
+          if isKeyw(p, "as"):
+            getTok(p)
+            if isKeyw(p, "enum"):
+              definition.add(parseDataType(p))
+              definitions.add(definition)
+      else:
+        getTok(p)
+  finally:
+    close(p)
+
+proc parseEnumTypeDefs*(input: string; filename = ""): SqlNode =
+  ## Finds enum type definitions, including definitions inside dollar-quoted blocks.
+  result = newNode(nkStmtList)
+  scanEnumTypeDefs(input, filename, result)

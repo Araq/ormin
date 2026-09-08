@@ -13,6 +13,8 @@ type
     name: string
     tabIndex: int
     typ: DbTypekind
+    typeName: string
+    validValues: seq[string]
     key: int   # 0 nothing special,
                # +1 -- primary key
                # -N -- references attribute N
@@ -28,6 +30,7 @@ type
   DbColumns* = seq[DbColumn]
 
   KnownTables* = OrderedTable[string, DbColumns]
+  KnownEnums = Table[string, seq[string]]
   ImportTarget* = enum
     postgre, sqlite, mysql
 
@@ -40,13 +43,30 @@ proc hasRefs(colDesc: SqlNode): (string, string) =
   for i in 2 ..< colDesc.len:
     let c = colDesc[i]
     if c.kind == nkReferences:
-      if c[0].kind == nkCall:
-        return (c[0][0].strVal, c[0][1].strVal)
-      elif c[0].kind == nkIdent:
-        return ($c[0], "id")
+      if c[0].kind == nkColumnReference:
+        return (sqlIdentName(c[0][0]), sqlIdentBaseName(c[0][1]))
+      elif c[0].kind == nkCall:
+        return (sqlIdentName(c[0][0]), sqlIdentBaseName(c[0][1]))
+      elif c[0].kind in {nkIdent, nkQuotedIdent, nkDot}:
+        return (sqlIdentName(c[0]), "id")
   ("", "")
 
-proc getType(n: SqlNode): DbType =
+proc collectEnumTypes(schemaSql: string): KnownEnums =
+  result = initTable[string, seq[string]]()
+  let definitions = parseEnumTypeDefs(schemaSql)
+  for i in 0 ..< definitions.len:
+    let definition = definitions[i]
+    let typeName = sqlIdentName(definition[0]).toLowerAscii()
+    var values: seq[string] = @[]
+    for value in definition[1].sons:
+      values.add(value.strVal)
+    result[typeName] = values
+
+    let dotPos = typeName.rfind('.')
+    if dotPos >= 0 and dotPos + 1 < typeName.len:
+      result[typeName[dotPos + 1 .. ^1]] = values
+
+proc getType(n: SqlNode; enums: KnownEnums): DbType =
   var it = n
   if it.kind == nkCall:
     it = it[0]
@@ -56,21 +76,28 @@ proc getType(n: SqlNode): DbType =
     for i in 0 ..< it.len:
       assert it[i].kind == nkStringLit
       result.validValues.add it[i].strVal
-  elif it.kind in {nkIdent, nkStringLit}:
-    result.kind = dbTypFromName(it.strVal)
-    result.name = it.strVal
+  elif it.kind in {nkIdent, nkQuotedIdent, nkStringLit, nkDot}:
+    let typeName = sqlIdentName(it)
+    let normalized = typeName.toLowerAscii
+    if enums.hasKey(normalized):
+      result.kind = dbEnum
+      result.validValues = enums[normalized]
+    else:
+      let baseName = sqlIdentBaseName(it)
+      result.kind = dbTypFromName(baseName)
+    result.name = typeName
 
-proc collectTables*(n: SqlNode; t: var KnownTables) =
+proc collectTables*(n: SqlNode; t: var KnownTables; enums: KnownEnums) =
   if n.isNil:
     return
   case n.kind
   of nkCreateTable, nkCreateTableIfNotExists:
-    let tableName = n[0].strVal
+    let tableName = sqlIdentName(n[0])
     var cols: DbColumns = @[]
     for i in 1 ..< n.len:
       let it = n[i]
       if it.kind == nkColumnDef:
-        var typ = getType(it[1])
+        var typ = getType(it[1], enums)
         if hasAttribute(it, {nkNotNull}):
           typ.notNull = true
         cols.add DbColumn(
@@ -97,9 +124,9 @@ proc collectTables*(n: SqlNode; t: var KnownTables) =
         var refTable = ""
         var refCols: seq[string] = @[]
         if r.kind == nkColumnReference or r.kind == nkCall:
-          refTable = r[0].strVal
+          refTable = sqlIdentName(r[0])
           for k in 1 ..< r.len:
-            refCols.add(r[k].strVal)
+            refCols.add(sqlIdentBaseName(r[k]))
         let pairCount = min(localCols.len, refCols.len)
         for k in 0 ..< pairCount:
           let localName = localCols[k]
@@ -111,25 +138,54 @@ proc collectTables*(n: SqlNode; t: var KnownTables) =
     t[tableName] = cols
   else:
     for i in 0 ..< n.len:
-      collectTables(n[i], t)
+      collectTables(n[i], t, enums)
 
 proc attrToKey(a: DbColumn; t: KnownTables): int =
   if a.primaryKey:
     return 1
   if a.refs[0].len > 0:
+    var referencedTable = ""
+    for tableName in keys(t):
+      if cmpIgnoreCase(tableName, a.refs[0]) == 0:
+        referencedTable = tableName
+        break
+
+    if referencedTable.len == 0 and '.' notin a.refs[0]:
+      for tableName in keys(t):
+        let dotPos = tableName.rfind('.')
+        let baseName =
+          if dotPos >= 0: tableName[dotPos + 1 .. ^1]
+          else: tableName
+        if cmpIgnoreCase(baseName, a.refs[0]) == 0:
+          if referencedTable.len > 0:
+            return 0
+          referencedTable = tableName
+
+    if referencedTable.len == 0:
+      return 0
+
     var i = 0
     for k, v in pairs(t):
       for b in v:
-        if cmpIgnoreCase(k, a.refs[0]) == 0 and cmpIgnoreCase(b.name, a.refs[1]) == 0:
+        if cmpIgnoreCase(k, referencedTable) == 0 and cmpIgnoreCase(b.name, a.refs[1]) == 0:
           return -i - 1
         inc i
   0
 
+proc addStringSeq(dest: var string; values: openArray[string]) =
+  dest.add "@["
+  for i, value in values:
+    if i > 0:
+      dest.add ", "
+    dest.add escape(value)
+  dest.add "]"
+
 proc renderModelCode(schemaSql, schemaPath: string; target: ImportTarget; includeStatic = false): string =
   discard target
   let sql = parseSql(schemaSql, schemaPath)
+  let enums = collectEnumTypes(schemaSql)
   var knownTables = initOrderedTable[string, DbColumns]()
-  collectTables(sql, knownTables)
+  collectTables(sql, knownTables, enums)
 
   result.add FileHeader
   result.add "const tableNames = ["
@@ -158,6 +214,10 @@ proc renderModelCode(schemaSql, schemaPath: string; target: ImportTarget; includ
       result.add $i
       result.add ", typ: "
       result.add $a.typ.kind
+      result.add ", typeName: "
+      result.add escape(a.typ.name)
+      result.add ", validValues: "
+      result.addStringSeq(a.typ.validValues)
       result.add ", key: "
       result.add $attrToKey(a, knownTables)
       result.add ")"

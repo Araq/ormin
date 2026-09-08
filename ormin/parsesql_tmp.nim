@@ -477,6 +477,7 @@ type
     nkHexStringLit,
     nkIntegerLit,
     nkNumericLit,
+    nkRaw,
     nkPrimaryKey,
     nkForeignKey,
     nkNotNull,
@@ -540,7 +541,7 @@ type
 const
   LiteralNodes = {
     nkIdent, nkQuotedIdent, nkStringLit, nkBitStringLit, nkHexStringLit,
-    nkIntegerLit, nkNumericLit
+    nkIntegerLit, nkNumericLit, nkRaw
   }
 
 type
@@ -588,6 +589,26 @@ proc `[]`*(n: SqlNode; i: BackwardsIndex): SqlNode = n.sons[n.len - int(i)]
 proc add*(father, n: SqlNode) =
   add(father.sons, n)
 
+proc sqlIdentName*(n: SqlNode): string =
+  ## Return a SQL identifier name from an identifier or dotted identifier node.
+  case n.kind
+  of nkIdent, nkQuotedIdent:
+    result = n.strVal
+  of nkDot:
+    result = sqlIdentName(n[0]) & "." & sqlIdentName(n[1])
+  else:
+    result = ""
+
+proc sqlIdentBaseName*(n: SqlNode): string =
+  ## Return the unqualified final identifier from an identifier node.
+  case n.kind
+  of nkIdent, nkQuotedIdent:
+    result = n.strVal
+  of nkDot:
+    result = sqlIdentBaseName(n[1])
+  else:
+    result = ""
+
 proc getTok(p: var SqlParser) =
   getTok(p, p.tok)
 
@@ -632,6 +653,145 @@ proc eat(p: var SqlParser, keyw: string) =
 proc opt(p: var SqlParser, kind: TokKind) =
   if p.tok.kind == kind: getTok(p)
 
+proc skipToSemicolon(p: var SqlParser) =
+  while p.tok.kind notin {tkSemicolon, tkEof}:
+    getTok(p)
+
+proc skipBalancedParens(p: var SqlParser) =
+  if p.tok.kind != tkParLe:
+    return
+
+  var depth = 0
+  while p.tok.kind != tkEof:
+    var shouldReadNext = true
+    case p.tok.kind
+    of tkParLe:
+      inc depth
+    of tkParRi:
+      dec depth
+      getTok(p)
+      if depth == 0:
+        return
+      else:
+        shouldReadNext = false
+    else:
+      discard
+    if shouldReadNext:
+      getTok(p)
+
+proc stripTrailingSqlSpace(sql: var string) =
+  while sql.len > 0 and sql[^1] in Whitespace:
+    sql.setLen(sql.len - 1)
+
+proc addSqlStringLiteral(sql: var string; value: string; prefix = "") =
+  sql.add(prefix)
+  sql.add('\'')
+  sql.add(value.replace("'", "''"))
+  sql.add('\'')
+
+proc addSqlToken(sql: var string; tok: Token) =
+  case tok.kind
+  of tkParLe:
+    sql.add('(')
+  of tkParRi:
+    sql.stripTrailingSqlSpace()
+    sql.add(')')
+  of tkBracketLe:
+    sql.add('[')
+  of tkBracketRi:
+    sql.stripTrailingSqlSpace()
+    sql.add(']')
+  of tkComma:
+    sql.stripTrailingSqlSpace()
+    sql.add(", ")
+  of tkDot, tkColon:
+    sql.stripTrailingSqlSpace()
+    sql.add(tok.literal)
+  of tkOperator:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.add(tok.literal)
+    sql.add(' ')
+  of tkQuotedIdentifier:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.add('"')
+    sql.add(tok.literal.replace("\"", "\"\""))
+    sql.add('"')
+  of tkStringConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.addSqlStringLiteral(tok.literal)
+  of tkEscapeConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    var escaped = tok.literal.replace("\\", "\\\\")
+    escaped = escaped.replace("'", "''")
+    sql.add("E'")
+    sql.add(escaped)
+    sql.add('\'')
+  of tkDollarQuotedConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    var tag = "$ormin$"
+    while tag in tok.literal:
+      tag = tag[0 ..< ^1] & "_or$"
+    sql.add(tag)
+    sql.add(tok.literal)
+    sql.add(tag)
+  of tkBitStringConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.addSqlStringLiteral(tok.literal, "B")
+  of tkHexStringConstant:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.addSqlStringLiteral(tok.literal, "X")
+  of tkEof:
+    discard
+  else:
+    if sql.len > 0 and sql[^1] notin Whitespace + {'(', '[', '.', ':'}:
+      sql.add(' ')
+    sql.add(tok.literal)
+
+proc readBalancedSql(p: var SqlParser): string =
+  if p.tok.kind != tkParLe:
+    return
+
+  var depth = 0
+  while p.tok.kind != tkEof:
+    let kind = p.tok.kind
+    case kind
+    of tkParLe:
+      inc depth
+    of tkParRi:
+      dec depth
+    else:
+      discard
+    result.addSqlToken(p.tok)
+    getTok(p)
+    if kind == tkParRi and depth == 0:
+      return
+
+  sqlError(p, "closing parenthesis expected")
+
+proc parseIdentNode(p: var SqlParser): SqlNode =
+  expectIdent(p)
+  if p.tok.kind == tkQuotedIdentifier:
+    result = newNode(nkQuotedIdent, p.tok.literal)
+  else:
+    result = newNode(nkIdent, p.tok.literal)
+  getTok(p)
+
+proc parseQualifiedIdentifier(p: var SqlParser): SqlNode =
+  result = parseIdentNode(p)
+  while p.tok.kind == tkDot:
+    getTok(p)
+    let left = result
+    result = newNode(nkDot)
+    result.add(left)
+    result.add(parseIdentNode(p))
+
 proc parseDataType(p: var SqlParser): SqlNode =
   if isKeyw(p, "enum"):
     result = newNode(nkEnumDef)
@@ -646,9 +806,7 @@ proc parseDataType(p: var SqlParser): SqlNode =
         getTok(p)
       eat(p, tkParRi)
   else:
-    expectIdent(p)
-    result = newNode(nkIdent, p.tok.literal)
-    getTok(p)
+    result = parseQualifiedIdentifier(p)
     if p.tok.kind == tkParLe:
       var complexType = newNode(nkCall)
       complexType.add(result)
@@ -766,6 +924,10 @@ proc primary(p: var SqlParser): SqlNode =
       else:
         sqlError(p, "identifier expected")
       getTok(p)
+    of tkColon:
+      getTok(p)
+      eat(p, tkColon)
+      discard parseDataType(p)
     else: break
 
 proc lowestExprAux(p: var SqlParser, v: out SqlNode, limit: int): int =
@@ -789,8 +951,7 @@ proc parseExpr(p: var SqlParser): SqlNode =
   discard lowestExprAux(p, result, - 1)
 
 proc parseTableName(p: var SqlParser): SqlNode =
-  expectIdent(p)
-  result = primary(p)
+  result = parseQualifiedIdentifier(p)
 
 proc parseColumnReference(p: var SqlParser): SqlNode =
   result = parseTableName(p)
@@ -805,19 +966,37 @@ proc parseColumnReference(p: var SqlParser): SqlNode =
       result.add(parseTableName(p))
     eat(p, tkParRi)
 
+proc parseTableConstraint(p: var SqlParser): SqlNode
+
 proc parseCheck(p: var SqlParser): SqlNode =
   getTok(p)
   result = newNode(nkCheck)
-  result.add(parseExpr(p))
+  if p.tok.kind == tkParLe:
+    result.add(newNode(nkRaw, readBalancedSql(p)))
+  else:
+    result.add(parseExpr(p))
 
 proc parseConstraint(p: var SqlParser): SqlNode =
   getTok(p)
-  result = newNode(nkConstraint)
   expectIdent(p)
-  result.add(newNode(nkIdent, p.tok.literal))
+  let constraintName = newNode(nkIdent, p.tok.literal)
   getTok(p)
-  optKeyw(p, "check")
-  result.add(parseExpr(p))
+  if isKeyw(p, "foreign") or isKeyw(p, "primary") or isKeyw(p, "unique"):
+    result = parseTableConstraint(p)
+  elif isKeyw(p, "check"):
+    result = newNode(nkConstraint)
+    result.add(constraintName)
+    let checkNode = parseCheck(p)
+    if checkNode.len > 0:
+      result.add(checkNode[0])
+    else:
+      result.add(newNode(nkIdent, "true"))
+  else:
+    result = newNode(nkConstraint)
+    result.add(constraintName)
+    result.add(newNode(nkIdent, "true"))
+    while p.tok.kind notin {tkComma, tkParRi, tkEof}:
+      getTok(p)
 
 proc parseParIdentList(p: var SqlParser, father: SqlNode) =
   eat(p, tkParLe)
@@ -937,6 +1116,22 @@ proc parseColumnConstraints(p: var SqlParser, result: SqlNode) =
     elif isKeyw(p, "identity"):
       getTok(p)
       result.add(newNode(nkIdentity))
+    elif isKeyw(p, "generated"):
+      getTok(p)
+      optKeyw(p, "always")
+      if isKeyw(p, "by"):
+        getTok(p)
+        optKeyw(p, "default")
+      optKeyw(p, "as")
+      if isKeyw(p, "identity"):
+        getTok(p)
+        result.add(newNode(nkIdentity))
+        if p.tok.kind == tkParLe:
+          skipBalancedParens(p)
+      elif p.tok.kind == tkParLe:
+        skipBalancedParens(p)
+        optKeyw(p, "stored")
+        optKeyw(p, "virtual")
     elif isKeyw(p, "primary"):
       getTok(p)
       eat(p, "key")
@@ -1076,7 +1271,7 @@ proc parseTableConstraint(p: var SqlParser): SqlNode =
     result.add(m)
   elif isKeyw(p, "unique"):
     getTok(p)
-    eat(p, "key")
+    optKeyw(p, "key")
     result = newNode(nkUnique)
     parseParIdentList(p, result)
   elif isKeyw(p, "check"):
@@ -1092,12 +1287,7 @@ proc parseUnique(p: var SqlParser): SqlNode =
 
 proc parseTableDef(p: var SqlParser): SqlNode =
   result = parseIfNotExists(p, nkCreateTable)
-  expectIdent(p)
-  if p.tok.kind == tkQuotedIdentifier:
-    result.add(newNode(nkQuotedIdent, p.tok.literal))
-  else:
-    result.add(newNode(nkIdent, p.tok.literal))
-  getTok(p)
+  result.add(parseQualifiedIdentifier(p))
   if p.tok.kind == tkParLe:
     getTok(p)
     while p.tok.kind != tkParRi:
@@ -1120,9 +1310,7 @@ proc parseTableDef(p: var SqlParser): SqlNode =
 
 proc parseTypeDef(p: var SqlParser): SqlNode =
   result = parseIfNotExists(p, nkCreateType)
-  expectIdent(p)
-  result.add(newNode(nkIdent, p.tok.literal))
-  getTok(p)
+  result.add(parseQualifiedIdentifier(p))
   eat(p, "as")
   result.add(parseDataType(p))
 
@@ -1212,27 +1400,16 @@ proc parseIndexDef(p: var SqlParser): SqlNode =
     result.add(newNode(nkIdent, p.tok.literal))
     getTok(p)
   eat(p, "on")
-  expectIdent(p)
-  result.add(newNode(nkIdent, p.tok.literal))
-  getTok(p)
+  result.add(parseQualifiedIdentifier(p))
   eat(p, tkParLe)
-  expectIdent(p)
-  result.add(newNode(nkIdent, p.tok.literal))
-  getTok(p)
-  while p.tok.kind == tkComma:
-    getTok(p)
-    expectIdent(p)
-    result.add(newNode(nkIdent, p.tok.literal))
-    getTok(p)
-  eat(p, tkParRi)
+  skipBalancedParens(p)
+  skipToSemicolon(p)
 
 proc parseInsert(p: var SqlParser): SqlNode =
   getTok(p)
   eat(p, "into")
-  expectIdent(p)
   result = newNode(nkInsert)
-  result.add(newNode(nkIdent, p.tok.literal))
-  getTok(p)
+  result.add(parseQualifiedIdentifier(p))
   if p.tok.kind == tkParLe:
     var n = newNode(nkColumnList)
     parseParIdentList(p, n)
@@ -1253,6 +1430,7 @@ proc parseInsert(p: var SqlParser): SqlNode =
       getTok(p)
     result.add(n)
     eat(p, tkParRi)
+  skipToSemicolon(p)
 
 proc parseUpdate(p: var SqlParser): SqlNode =
   getTok(p)
@@ -1401,6 +1579,9 @@ proc parseSelect(p: var SqlParser): SqlNode =
 proc parseStmt(p: var SqlParser; parent: SqlNode) =
   if isKeyw(p, "create"):
     getTok(p)
+    if isKeyw(p, "or"):
+      getTok(p)
+      optKeyw(p, "replace")
     optKeyw(p, "cached")
     optKeyw(p, "memory")
     optKeyw(p, "temp")
@@ -1416,7 +1597,7 @@ proc parseStmt(p: var SqlParser; parent: SqlNode) =
     elif isKeyw(p, "index"):
       parent.add parseIndexDef(p)
     else:
-      sqlError(p, "TABLE expected")
+      skipToSemicolon(p)
   elif isKeyw(p, "insert"):
     parent.add parseInsert(p)
   elif isKeyw(p, "update"):
@@ -1430,8 +1611,12 @@ proc parseStmt(p: var SqlParser; parent: SqlNode) =
     parent.add parsePragma(p)
   elif isKeyw(p, "begin"):
     getTok(p)
+  elif isKeyw(p, "do") or isKeyw(p, "drop") or isKeyw(p, "alter") or
+      isKeyw(p, "grant") or isKeyw(p, "revoke") or isKeyw(p, "comment") or
+      isKeyw(p, "notify") or isKeyw(p, "listen"):
+    skipToSemicolon(p)
   else:
-    sqlError(p, "SELECT, CREATE, UPDATE or DELETE expected")
+    skipToSemicolon(p)
 
 proc parse(p: var SqlParser): SqlNode =
   ## parses the content of `p`'s input stream and returns the SQL AST.
@@ -1533,6 +1718,8 @@ proc ra(n: SqlNode, s: var SqlWriter) =
   of nkHexStringLit:
     s.add("x'" & n.strVal & "'")
   of nkIntegerLit, nkNumericLit:
+    s.add(n.strVal)
+  of nkRaw:
     s.add(n.strVal)
   of nkPrimaryKey:
     s.addKeyw("primary key")
@@ -1856,3 +2043,32 @@ proc parseSql*(input: string, filename = "", considerTypeParams = false): SqlNod
   ## `filename` is only used for error messages.
   ## Syntax errors raise an `SqlParseError` exception.
   parseSql(newStringStream(input), "", considerTypeParams)
+
+proc scanEnumTypeDefs(input, filename: string; definitions: SqlNode) =
+  var p: SqlParser
+  open(p, newStringStream(input), filename)
+  try:
+    while p.tok.kind != tkEof:
+      if p.tok.kind == tkDollarQuotedConstant:
+        let body = p.tok.literal
+        getTok(p)
+        scanEnumTypeDefs(body, filename, definitions)
+      elif isKeyw(p, "create"):
+        getTok(p)
+        if isKeyw(p, "type"):
+          let definition = parseIfNotExists(p, nkCreateType)
+          definition.add(parseQualifiedIdentifier(p))
+          if isKeyw(p, "as"):
+            getTok(p)
+            if isKeyw(p, "enum"):
+              definition.add(parseDataType(p))
+              definitions.add(definition)
+      else:
+        getTok(p)
+  finally:
+    close(p)
+
+proc parseEnumTypeDefs*(input: string; filename = ""): SqlNode =
+  ## Finds enum type definitions, including definitions inside dollar-quoted blocks.
+  result = newNode(nkStmtList)
+  scanEnumTypeDefs(input, filename, result)

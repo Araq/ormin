@@ -36,12 +36,13 @@ jobs:
         nim-version: ${{ matrix.nim }}
 
     - name: Install Atlas
+      shell: bash
+      env:
+        ATLAS_INSTALL_DIR: ${{ runner.temp }}/atlas/bin
       run: |
-        curl -fsSL --retry 3 -o "$RUNNER_TEMP/atlas.tar.gz" \
-          https://github.com/nim-lang/atlas/releases/download/0.16.3/atlas-linux-amd64.tar.gz
-        echo "2515b80219fac42996db2583858233671e562cd430c1d0e8ff3e9819dd95d58e  $RUNNER_TEMP/atlas.tar.gz" | sha256sum --check
-        tar -xzf "$RUNNER_TEMP/atlas.tar.gz" -C "$RUNNER_TEMP"
-        echo "$RUNNER_TEMP/atlas-linux-amd64" >> "$GITHUB_PATH"
+        curl -fsSL --retry 3 \
+          https://raw.githubusercontent.com/nim-lang/atlas/HEAD/install.sh | bash
+        echo "$ATLAS_INSTALL_DIR" >> "$GITHUB_PATH"
 
     - name: Cache dependencies
       uses: actions/cache@v4

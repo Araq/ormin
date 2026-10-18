@@ -17,7 +17,8 @@ task test, "Run all test suite":
   # These suites share test.db and must execute serially.
   exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
     "tests/tsqlite.nim tests/tdb_utils.nim tests/timportstatic.nim " &
-    "tests/ttransactions.nim")
+    "tests/ttransactions.nim tests/tpostgres_schema_import.nim " &
+    "tests/tqualified_schema_queries.nim")
   exec "atlas-run tests --jobs:2 tests/tquery_types.nim -- -d:release"
 
 task setup_postgres, "Ensure local Postgres has test DB/user":

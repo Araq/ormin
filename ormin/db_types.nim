@@ -5,7 +5,7 @@ proc dbTypFromName*(name: string): DbTypeKind =
   var k = dbUnknown
 
   case name.toLowerAscii
-  of "int", "integer", "int8", "smallint", "int16",
+  of "int", "integer", "int2", "int4", "int8", "smallint", "bigint", "int16",
       "longint", "int32", "int64", "tinyint", "hugeint": k = dbInt
   of "uint", "uint8", "uint16", "uint32", "uint64": k = dbUInt
   of "serial": k = dbSerial
@@ -14,7 +14,7 @@ proc dbTypFromName*(name: string): DbTypeKind =
   of "blob": k = dbBlob
   of "fixedchar": k = dbFixedChar
   of "varchar", "text", "string": k = dbVarchar
-  of "json": k = dbJson
+  of "json", "jsonb": k = dbJson
   of "xml": k = dbXml
   of "decimal": k = dbDecimal
   of "float", "double", "longdouble", "real": k = dbFloat

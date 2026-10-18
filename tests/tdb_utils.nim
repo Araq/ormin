@@ -1,4 +1,4 @@
-import unittest, os, sequtils
+import std/[assertions, os, sequtils, strutils, unittest]
 import db_connector/db_common
 from db_connector/db_sqlite import open, exec, getValue
 import ormin/db_utils
@@ -40,6 +40,22 @@ let sqlContent = """
 """
 
 const staticSqlContent = staticLoad("db_utils_case_quoted.sql")
+
+block checkConstraintRoundTrip:
+  const schema = """
+create table accounts (
+  balance integer check (balance >= 0),
+  code text constraint normalized_code check (
+    code ~ '^[A-Z]+$' and code = 'X'::text
+  )
+);
+"""
+  let pairs = tablePairs(schema).toSeq()
+  doAssert pairs.len == 1
+  doAssert pairs[0].model.contains("balance >= 0")
+  doAssert pairs[0].model.contains("code ~ '^[A-Z]+$'")
+  doAssert pairs[0].model.contains("'X'::text")
+  doAssert not pairs[0].model.contains("check true")
 
 writeFile($sqlFile, sqlContent)
 

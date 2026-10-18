@@ -34,6 +34,11 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
   if prepare_v2(db, q, q.len.cint, result, nil) != SQLITE_OK:
     dbError(db)
 
+proc finalizeStmt*(s: PStmt) {.raises: [].} =
+  ## Release a query's statement, including when bindings or result conversion raise.
+  ## stopQuery reports execution errors before this nonraising scope cleanup runs.
+  discard sqlite3.finalize(s)
+
 template startBindings*(s: PStmt; n: int) =
   if clear_bindings(s) != SQLITE_OK: dbError(db)
 

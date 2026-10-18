@@ -14,12 +14,11 @@ task test, "Run all test suite":
   buildimporterTask()
   cleanTask()
 
-  exec "nim c -f -r tests/tfeature"
-  exec "nim c -f -r tests/tcommon"
-  exec "nim c -f -r -d:release tests/tquery_types"
-  exec "nim c -f -r tests/tsqlite"
-  exec "nim c -f -r tests/tdb_utils"
-  exec "nim c -f -r tests/timportstatic"
+  # These suites share test.db and must execute serially.
+  exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
+    "tests/tsqlite.nim tests/tdb_utils.nim tests/timportstatic.nim " &
+    "tests/ttransactions.nim")
+  exec "atlas-run tests --jobs:2 tests/tquery_types.nim -- -d:release"
 
 task setup_postgres, "Ensure local Postgres has test DB/user":
   # Use a simple script to avoid Nim/psql quoting pitfalls
@@ -33,10 +32,11 @@ task test_postgres, "Run PostgreSQL test suite":
   exec "./tools/ormin_importer tests/forum_model_postgres.sql"
   exec "./tools/ormin_importer tests/model_postgre.sql"
 
-  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tfeature"
-  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tcommon"
-  exec "nim c -f -d:nimDebugDlOpen -r -d:release -d:postgre tests/tquery_types"
-  exec "nim c -f -d:nimDebugDlOpen -r -d:postgre tests/tpostgre"
+  # These suites share one PostgreSQL database and must execute serially.
+  exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
+    "tests/tpostgre.nim -- -d:nimDebugDlOpen -d:postgre")
+  exec("atlas-run tests --jobs:2 tests/tquery_types.nim -- " &
+    "-d:nimDebugDlOpen -d:release -d:postgre")
 
 task buildexamples, "Build examples: chat and forum":
   buildimporterTask()

@@ -30,39 +30,35 @@ jobs:
     - name: Checkout source code
       uses: actions/checkout@v4
       
-    - name: Cache choosenim
-      id: cache-choosenim
-      uses: actions/cache@v4
-      with:
-        path: ~/.choosenim
-        key: ${{ runner.os }}-choosenim-stable
-
-    - name: Cache nimble
-      id: cache-nimble
-      uses: actions/cache@v4
-      with:
-        path: ~/.nimble
-        key: ${{ runner.os }}-nimble-stable
-
     - name: Setup nim
       uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: ${{ matrix.nim }}
 
-    - name: Install dependencies
+    - name: Install Atlas
       run: |
-        nimble --useSystemNim install -d
-        nimble --useSystemNim install karax -y
-        nimble --useSystemNim install jester -y
-        nimble --useSystemNim install websocket -y
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/atlas.tar.gz" \
+          https://github.com/nim-lang/atlas/releases/download/0.16.3/atlas-linux-amd64.tar.gz
+        echo "2515b80219fac42996db2583858233671e562cd430c1d0e8ff3e9819dd95d58e  $RUNNER_TEMP/atlas.tar.gz" | sha256sum --check
+        tar -xzf "$RUNNER_TEMP/atlas.tar.gz" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/atlas-linux-amd64" >> "$GITHUB_PATH"
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: deps/
+        key: atlas-${{ runner.os }}-${{ hashFiles('ormin.nimble') }}
+
+    - name: Install dependencies
+      run: atlas install -uk --feature:examples
       
     - name: Run test sqlite
-      run: nimble --useSystemNim test
+      run: nim test
 
     - name: Run test postgres
-      run: nimble --useSystemNim test_postgres
+      run: nim test_postgres
       env:
         PGPASSWORD: test
 
     - name: Build examples
-      run: nimble buildexamples
+      run: nim buildexamples

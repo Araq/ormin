@@ -2,6 +2,7 @@ import unittest, db_connector/sqlite3, json, times, sequtils
 from db_connector/db_sqlite import exec, getValue
 import ormin
 import ormin/db_utils
+import ./tstatement_lifetime
 
 importModel(DbBackend.sqlite, "model_sqlite")
 

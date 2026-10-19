@@ -165,24 +165,30 @@ type
 
 # Execute a non-row SQL statement strictly (errors on failure)
 template execNoRowsStrict*(sqlStmt: string) =
-  when defined(debugOrminTrace):
-    echo "[[Ormin Executing]]: ", q
-  let s {.gensym.} = prepareStmt(db, sqlStmt)
-  startQuery(db, s)
-  if stepQuery(db, s, false):
-    stopQuery(db, s)
-  else:
-    stopQuery(db, s)
-    dbError(db)
+  block:
+    when defined(debugOrminTrace):
+      echo "[[Ormin Executing]]: ", sqlStmt
+    let s {.gensym.} = prepareStmt(db, sqlStmt)
+    when dbBackend == DbBackend.sqlite:
+      defer: finalizeStmt(s)
+    startQuery(db, s)
+    if stepQuery(db, s, false):
+      stopQuery(db, s)
+    else:
+      stopQuery(db, s)
+      dbError(db)
 
 # Execute a non-row SQL statement, relying on startQuery to raise on failure
 template execNoRowsLoose(sqlStmt: string) =
-  when defined(debugOrminTrace):
-    echo "[[Ormin Executing]]: ", sqlStmt
-  let s {.gensym.} = prepareStmt(db, sqlStmt)
-  startQuery(db, s)
-  discard stepQuery(db, s, false)
-  stopQuery(db, s)
+  block:
+    when defined(debugOrminTrace):
+      echo "[[Ormin Executing]]: ", sqlStmt
+    let s {.gensym.} = prepareStmt(db, sqlStmt)
+    when dbBackend == DbBackend.sqlite:
+      defer: finalizeStmt(s)
+    startQuery(db, s)
+    discard stepQuery(db, s, false)
+    stopQuery(db, s)
 
 proc newQueryBuilder(): QueryBuilder {.compileTime.} =
   QueryBuilder(head: "", fromm: "", join: "", values: "", where: "",
@@ -810,6 +816,11 @@ proc cond(n: NimNode; q: var string; params: var Params;
   else:
     macros.error "construct not supported in condition: " & treeRepr n, n
 
+proc addStatementCleanup(body, statement: NimNode) =
+  when dbBackend == DbBackend.sqlite:
+    body.add quote do:
+      defer: finalizeStmt(`statement`)
+
 proc generateRoutine(name: NimNode, q: QueryBuilder;
                      sql: string; k: NimNodeKind): NimNode =
   let prepStmt = ident($name & "PrepStmt")
@@ -818,6 +829,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
   let body = newStmtList()
   # Ensure the prepared statement is created before binding/starting the query
   body.add prepare
+  addStatementCleanup(body, prepStmt)
 
   var finalParams = newNimNode(nnkFormalParams)
   if q.retTypeIsJson:
@@ -887,7 +899,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     newEmptyNode(), # pragmas
     newEmptyNode(),
     body)
-  result = newStmtList(prepare, iter)
+  result = iter
 
 proc getColumnName(n: NimNode): string =
   case n.kind
@@ -1607,9 +1619,10 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   let prepStmt = genSym(nskLet)
   let res = genSym(nskVar)
   result = newTree(
-    if q.retType.len > 0: nnkStmtListExpr else: nnkStmtList,
+    nnkStmtList,
     newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
+  addStatementCleanup(result, prepStmt)
   let rtyp = if q.retType.len > 1 or q.retType.len == 0:
     q.retType
   else:
@@ -1724,6 +1737,7 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
   if q.retType.len > 0:
     result.add res
+  result = newTree(nnkBlockStmt, newEmptyNode(), result)
 
 proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNode): NimNode =
   expectKind body, nnkStmtList
@@ -1742,9 +1756,10 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
   let prepStmt = genSym(nskLet)
   let res = genSym(nskVar)
   result = newTree(
-    nnkStmtListExpr,
+    nnkStmtList,
     newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
+  addStatementCleanup(result, prepStmt)
   if q.singleRow:
     result.add newTree(nnkVarSection, newIdentDefs(res, copyNimTree(retType), newEmptyNode()))
   else:
@@ -1794,6 +1809,7 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
 
   result.add newTree(nnkBlockStmt, newEmptyNode(), blk)
   result.add res
+  result = newTree(nnkBlockStmt, newEmptyNode(), result)
 
 macro query*(args: varargs[untyped]): untyped =
   if args.len == 1:

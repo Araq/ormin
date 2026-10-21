@@ -70,6 +70,31 @@ importModel(DbBackend.postgre, "model_postgre")
 let db {.global.} = open("localhost", "user", "password", "dbname")
 ```
 
+For repeated queries on a dedicated PostgreSQL session, use the opt-in owned
+connection. It prepares each distinct SQL statement once on that session and
+reuses it. The cache defaults to 64 plans; additional distinct queries execute
+without creating another server-side plan. Set `maxPlans = 0` to disable the
+cache. The raw `DbConn` API remains available.
+
+```nim
+var db = openManaged("host=localhost dbname=dbname user=user password=password")
+defer: db.close() # optional for a local variable: scope exit closes it
+
+let rows = query:
+  select tb_serial(typinteger)
+```
+
+`ManagedDbConn` is move-only, so pass it as `var ManagedDbConn` to helpers.
+`createProc` and `createIter` accept both raw and owned PostgreSQL connections.
+Use one owned connection from one thread at a time. Named plans require a direct
+connection or session pooler; transaction pooling can switch backends between
+queries. `borrowRaw` provides a temporary handle for other libpq APIs; never
+close or reset that handle. Use `db.reset()` to reconnect and clear the cache.
+If a cached plan disappears or becomes invalid after a schema change, the query
+raises its original database error and the cache is disabled for that session.
+Ormin does not replay a query after a connection or plan error because its
+side effects may be uncertain. Callers may reset and retry when appropriate.
+
 ## Query DSL
 
 `query:` blocks are turned into prepared statements at compile time. Placeholders use `?` for Nim values and `%` for JSON values; Ormin chooses JSON instead of an ad-hoc variant type so your data can flow straight from/into `JsonNode` trees. `!!` splices vendor-specific SQL fragments. Typical clauses such as `with`, `where`, joins, `orderby`, `groupby`, `limit`, `offset`, `exists`, `distinct`, window expressions, `union`/`intersect`/`except`, `returning`, and insert upserts via `onconflict` + (`donothing` or `doupdate`) are supported. Referring to columns from related tables can trigger **automatic join generation** based on foreign keys, reducing boilerplate joins.

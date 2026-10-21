@@ -35,10 +35,12 @@ task test_postgres, "Run PostgreSQL test suite":
 
   # These suites share one PostgreSQL database and must execute serially.
   exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
-    "tests/tpostgre.nim tests/tpostgre_statement_lifecycle.nim -- " &
+    "tests/tpostgre.nim tests/tpostgre_statement_lifecycle.nim " &
+    "tests/tpostgre_managed_cache.nim -- " &
     "-d:nimDebugDlOpen -d:postgre")
   exec("atlas-run tests --jobs:2 tests/tquery_types.nim -- " &
     "-d:nimDebugDlOpen -d:release -d:postgre")
+  exec "bash tests/check_managed_copy.sh"
 
 task buildexamples, "Build examples: chat and forum":
   buildimporterTask()

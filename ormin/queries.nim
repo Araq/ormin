@@ -822,7 +822,7 @@ proc addStatementCleanup(body, statement: NimNode) =
       defer: finalizeStmt(`statement`)
 
 proc generateRoutine(name: NimNode, q: QueryBuilder;
-                     sql: string; k: NimNodeKind): NimNode =
+                     sql: string; k: NimNodeKind; dbType: NimNode): NimNode =
   let prepStmt = ident($name & "PrepStmt")
   let prepare = newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit(sql)))
 
@@ -847,12 +847,7 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
     if k != nnkIteratorDef:
       rtyp = nnkBracketExpr.newTree(ident"seq", rtyp)
     finalParams.add rtyp
-  when dbBackend == DbBackend.postgre:
-    finalParams.add newIdentDefs(ident"db", newTree(nnkDotExpr, ident"ormin_postgre", ident"DbConn"))
-  elif dbBackend == DbBackend.sqlite:
-    finalParams.add newIdentDefs(ident"db", newTree(nnkDotExpr, ident"ormin_sqlite", ident"DbConn"))
-  else:
-    finalParams.add newIdentDefs(ident"db", ident("DbConn"))
+  finalParams.add newIdentDefs(ident"db", dbType)
   var i = 1
   if q.params.len > 0:
     body.add newCall(bindSym"startBindings", prepStmt, newLit(q.params.len))
@@ -1938,7 +1933,17 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
   if q.kind notin {qkSelect, qkJoin}:
     macros.error "query must be a 'select' or 'join'", query
   let sql = queryAsString(q, query)
-  result = generateRoutine(name, q, sql, k)
+  when dbBackend == DbBackend.postgre:
+    let raw = newTree(nnkDotExpr, ident"ormin_postgre", ident"DbConn")
+    let managed = newTree(nnkVarTy,
+      newTree(nnkDotExpr, ident"ormin_postgre", ident"ManagedDbConn"))
+    result = newStmtList(generateRoutine(name, q, sql, k, raw),
+                         generateRoutine(name, q, sql, k, managed))
+  elif dbBackend == DbBackend.sqlite:
+    let dbType = newTree(nnkDotExpr, ident"ormin_sqlite", ident"DbConn")
+    result = generateRoutine(name, q, sql, k, dbType)
+  else:
+    result = generateRoutine(name, q, sql, k, ident("DbConn"))
   when defined(debugOrminDsl):
     macros.hint("Ormin Query: " & repr(result), query)
 

@@ -35,7 +35,8 @@ task test_postgres, "Run PostgreSQL test suite":
 
   # These suites share one PostgreSQL database and must execute serially.
   exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
-    "tests/tpostgre.nim -- -d:nimDebugDlOpen -d:postgre")
+    "tests/tpostgre.nim tests/tpostgre_statement_lifecycle.nim -- " &
+    "-d:nimDebugDlOpen -d:postgre")
   exec("atlas-run tests --jobs:2 tests/tquery_types.nim -- " &
     "-d:nimDebugDlOpen -d:release -d:postgre")
 

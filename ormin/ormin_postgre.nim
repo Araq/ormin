@@ -50,6 +50,13 @@ proc dbError*(db: DbConn) {.noreturn.} =
   e.msg = $pqErrorMessage(db)
   raise e
 
+proc dbError*(db: var ManagedDbConn) {.noreturn.} =
+  ## Raises the same PostgreSQL error as the raw connection, or a clear
+  ## error when the owned connection has already been closed.
+  if db.raw == nil:
+    raise newException(DbError, "Managed PostgreSQL connection is closed")
+  dbError(db.raw)
+
 proc c_strtod(buf: cstring, endptr: ptr cstring = nil): float64 {.
   importc: "strtod", header: "<stdlib.h>", noSideEffect.}
 

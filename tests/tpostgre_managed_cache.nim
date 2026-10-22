@@ -1,13 +1,44 @@
 import std/[os, strutils, unittest]
 
 import db_connector/db_postgres as pg
-from db_connector/postgres import pqgetvalue, pqnfields
+from db_connector/postgres import PPGconn, pqgetvalue, pqnfields
 import ormin
 import ormin/ormin_postgre as orminPostgre
+
+when defined(macosx):
+  {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
 
 importModel(DbBackend.postgre, "model_postgre")
 
 let target = getEnv("TEST_DATABASE_URL", "postgresql://test@localhost/test_ormin")
+
+when defined(windows):
+  const libpq = "libpq.dll"
+elif defined(macosx):
+  const libpq = "libpq.dylib"
+else:
+  const libpq = "libpq.so(.5|)"
+
+type ResultEventProc = proc(event: cint; info, context: pointer): cint {.cdecl.}
+
+proc registerResultEvent(conn: PPGconn; callback: ResultEventProc;
+                         name: cstring; context: pointer): cint {.
+  cdecl, importc: "PQregisterEventProc", dynlib: libpq.}
+
+var resultCreated, resultDestroyed: int
+
+proc countResultEvent(event: cint; info, context: pointer): cint {.cdecl.} =
+  # libpq reports PGresult creation/destruction as event IDs 3 and 5.
+  if event == 3:
+    inc resultCreated
+  elif event == 5:
+    inc resultDestroyed
+  1
+
+type FailingConversion = distinct int
+
+proc fromQueryHook*(dest: var FailingConversion; value: int) =
+  raise newException(ValueError, "conversion failed")
 
 proc queryInt(db: var ManagedDbConn; sql: string; value: int): string =
   let statement = orminPostgre.prepareStmt(db, sql)
@@ -83,7 +114,101 @@ suite "owned PostgreSQL plan cache":
     expect DbError:
       discard orminPostgre.prepareStmt(db, "select 1")
     expect DbError:
+      orminPostgre.dbError(db)
+    expect DbError:
       db.reset()
+
+  test "single-row queries and insert returning work on owned connections":
+    var db = openManaged(target)
+    pg.exec(db.borrowRaw,
+      sql"create temporary table tb_serial (typserial serial primary key, typinteger integer not null)")
+    let value = 31
+    let insertedId = query:
+      insert tb_serial(typinteger = ?value)
+      returning typserial
+    check insertedId == 1
+
+    let untypedRow = query:
+      select tb_serial(typinteger)
+      where typserial == ?insertedId
+      limit 1
+    check untypedRow == value
+
+    let typedRow = query(int):
+      select tb_serial(typinteger)
+      where typserial == ?insertedId
+      limit 1
+    check typedRow == value
+
+    let missingId = 999
+    expect DbError:
+      discard query:
+        select tb_serial(typinteger)
+        where typserial == ?missingId
+        limit 1
+    expect DbError:
+      discard query(int):
+        select tb_serial(typinteger)
+        where typserial == ?missingId
+        limit 1
+    let missingUntyped = tryQuery:
+      select tb_serial(typinteger)
+      where typserial == ?missingId
+      limit 1
+    check missingUntyped == 0
+    let missingTyped = tryQuery(int):
+      select tb_serial(typinteger)
+      where typserial == ?missingId
+      limit 1
+    check missingTyped == 0
+
+    # A server error from INSERT ... RETURNING must keep the session usable.
+    expect DbError:
+      discard query:
+        insert tb_serial(typserial = ?insertedId, typinteger = ?value)
+        returning typserial
+    check pg.getValue(db.borrowRaw, sql"select count(*) from tb_serial") == "1"
+    check db.managedPlanCount <= DEFAULT_MANAGED_PLAN_LIMIT
+
+  test "single-row success, empty results and errors release libpq results":
+    var db = openManaged(target)
+    pg.exec(db.borrowRaw,
+      sql"create temporary table tb_serial (typserial serial primary key, typinteger integer not null)")
+    check registerResultEvent(db.borrowRaw, countResultEvent,
+      "ormin-managed-result-lifetime", nil) == 1
+    resultCreated = 0
+    resultDestroyed = 0
+
+    let value = 7
+    let insertedId = query:
+      insert tb_serial(typinteger = ?value)
+      returning typserial
+    check insertedId == 1
+    let typedRow = query(int):
+      select tb_serial(typinteger)
+      where typserial == ?insertedId
+      limit 1
+    check typedRow == value
+    let missingId = 999
+    expect DbError:
+      discard query(int):
+        select tb_serial(typinteger)
+        where typserial == ?missingId
+        limit 1
+    expect DbError:
+      discard query:
+        insert tb_serial(typserial = ?insertedId, typinteger = ?value)
+        returning typserial
+    expect ValueError:
+      discard query(FailingConversion):
+        select tb_serial(typinteger)
+        limit 1
+    createIter rowsForResultCleanup:
+      select tb_serial(typinteger)
+    for row in db.rowsForResultCleanup():
+      break
+    check resultCreated > 0
+    check resultDestroyed == resultCreated
 
   test "generated query blocks use the owned connection cache":
     var db = openManaged(target)

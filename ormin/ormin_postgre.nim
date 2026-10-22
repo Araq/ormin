@@ -6,7 +6,18 @@ export db_common
 
 type
   DbConn* = PPGconn    ## encapsulates a database connection
-  PStmt = string ## a identifier for the prepared queries
+  PStmt = string ## SQL text passed to the extended query protocol
+
+  ManagedPlan = object
+    sql, name: string
+
+  ManagedDbConn* = object
+    ## Owns one libpq session and at most `maxPlans` named plans in that session.
+    raw: DbConn
+    plans: seq[ManagedPlan]
+    maxPlans, nextPlanId: int
+    backendPid: int32
+    cacheDisabled: bool
 
   varcharType* = string
   intType* = int
@@ -15,6 +26,20 @@ type
   timestampType* = Datetime
   serialType* = int
   jsonType* = JsonNode
+
+proc `=destroy`(db: ManagedDbConn) =
+  if db.raw != nil:
+    pqfinish(db.raw)
+  `=destroy`(db.plans)
+
+proc `=wasMoved`(db: var ManagedDbConn) =
+  db.raw = nil
+  wasMoved(db.plans)
+
+proc `=copy`(dest: var ManagedDbConn; source: ManagedDbConn) {.error.}
+proc `=dup`(source: ManagedDbConn): ManagedDbConn {.error.}
+
+const DEFAULT_MANAGED_PLAN_LIMIT* = 64
 
 var jsonTimeFormat* = "yyyy-MM-dd HH:mm:ss"
 
@@ -25,21 +50,26 @@ proc dbError*(db: DbConn) {.noreturn.} =
   e.msg = $pqErrorMessage(db)
   raise e
 
+proc dbError*(db: var ManagedDbConn) {.noreturn.} =
+  ## Raises the same PostgreSQL error as the raw connection, or a clear
+  ## error when the owned connection has already been closed.
+  if db.raw == nil:
+    raise newException(DbError, "Managed PostgreSQL connection is closed")
+  dbError(db.raw)
+
 proc c_strtod(buf: cstring, endptr: ptr cstring = nil): float64 {.
   importc: "strtod", header: "<stdlib.h>", noSideEffect.}
 
 proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
   importc: "strtol", header: "<stdlib.h>", noSideEffect.}
 
-var sid {.compileTime.}: int
-
 proc prepareStmt*(db: DbConn; q: string): PStmt =
   when defined(debugOrminTrace):
     echo "[[Ormin Executing]]: ", q
-  inc sid
-  result = "ormin" & $sid
-  var res = pqprepare(db, result, q, 0, nil)
-  if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
+  # Ormin used to create a new named server-side statement for every call.
+  # Long-lived connections retained every plan, and the prepare result was
+  # never cleared. Execute parameterized SQL directly instead.
+  result = q
 
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive
@@ -232,16 +262,27 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   let src = pqgetvalue(queryResult, queryI, idx.cint)
   obj[name] = parseJson($src)  
 
+proc checkQueryResult(db: DbConn; res: PPGresult) =
+  if res != nil and pqResultStatus(res) in {PGRES_COMMAND_OK, PGRES_TUPLES_OK}:
+    return
+  # Copy the result's error before releasing it. Failed PQexecParams calls
+  # still return an allocated PGresult that the caller will never stopQuery.
+  let detail =
+    if res == nil: $pqErrorMessage(db)
+    else: $pqResultErrorMessage(res)
+  let message = if detail.len > 0: detail else: $pqErrorMessage(db)
+  if res != nil:
+    pqclear(res)
+  raise newException(DbError, message)
+
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):
-    var queryResult {.inject.} = pqexecPrepared(db, s, int32(parr.len),
-            cast[cstringArray](addr parr), nil, nil, 0)
+    var queryResult {.inject.} = pqexecParams(db, s.cstring, int32(parr.len),
+            nil, cast[cstringArray](addr parr), nil, nil, 0)
   else:
-    var queryResult {.inject.} = pqexecPrepared(db, s, int32(0),
-            nil, nil, nil, 0)
-  if pqResultStatus(queryResult) == PGRES_COMMAND_OK:
-    discard # insert does not returns data in pg
-  elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: ormin_postgre.dbError(db)
+    var queryResult {.inject.} = pqexecParams(db, s.cstring, int32(0),
+            nil, nil, nil, nil, 0)
+  checkQueryResult(db, queryResult)
   var queryI {.inject.} = cint(-1)
   var queryLen {.inject.} = pqntuples(queryResult)
 
@@ -272,3 +313,162 @@ proc open*(connection, user, password, database: string): DbConn =
            else: substr(connection, colonPos+1)
   result = pqsetdbLogin(host, port, nil, nil, database, user, password)
   if pqStatus(result) != CONNECTION_OK: dbError(result) # result = nil
+
+proc openManaged*(conninfo: string;
+                  maxPlans = DEFAULT_MANAGED_PLAN_LIMIT): ManagedDbConn =
+  ## Opens an owned session. Use a direct PostgreSQL or session-pooled connection;
+  ## transaction pooling cannot promise that named plans stay on one backend.
+  if maxPlans < 0:
+    raise newException(ValueError, "maxPlans must be nonnegative")
+  result.raw = pqconnectdb(conninfo.cstring)
+  if result.raw == nil:
+    raise newException(DbError, "Could not allocate a PostgreSQL connection")
+  if pqStatus(result.raw) != CONNECTION_OK:
+    let message = $pqErrorMessage(result.raw)
+    pqfinish(result.raw)
+    result.raw = nil
+    raise newException(DbError, message)
+  result.maxPlans = maxPlans
+  result.backendPid = pqbackendPID(result.raw)
+
+proc borrowRaw*(db: var ManagedDbConn): DbConn =
+  ## Borrows the libpq handle for APIs that require it. Do not finish or reset
+  ## this handle; use `close` or `reset` on the owner instead.
+  db.raw
+
+proc managedPlanCount*(db: var ManagedDbConn): int = db.plans.len
+
+proc close*(db: var ManagedDbConn) =
+  ## Closes the session and discards its cache. Repeated close is harmless.
+  `=destroy`(db)
+  `=wasMoved`(db)
+
+proc reset*(db: var ManagedDbConn) =
+  ## Reconnects the same libpq handle and invalidates every cached plan.
+  if db.raw == nil:
+    raise newException(DbError, "Managed PostgreSQL connection is closed")
+  db.plans.setLen(0)
+  db.nextPlanId = 0
+  db.cacheDisabled = false
+  pqreset(db.raw)
+  if pqStatus(db.raw) != CONNECTION_OK:
+    dbError(db.raw)
+  db.backendPid = pqbackendPID(db.raw)
+
+proc planName(db: var ManagedDbConn; sql: string): string =
+  for plan in db.plans:
+    if plan.sql == sql:
+      return plan.name
+
+proc prepareStmt*(db: var ManagedDbConn; q: string): PStmt =
+  ## Prepares a query once per owned session, up to its plan limit. Excess
+  ## distinct queries use PQexecParams without retaining another server plan.
+  if db.raw == nil:
+    raise newException(DbError, "Managed PostgreSQL connection is closed")
+  if pqStatus(db.raw) != CONNECTION_OK:
+    dbError(db.raw)
+  let pid = pqbackendPID(db.raw)
+  if pid != db.backendPid:
+    db.plans.setLen(0)
+    db.nextPlanId = 0
+    db.backendPid = pid
+  when defined(debugOrminTrace):
+    echo "[[Ormin Executing]]: ", q
+  result = q
+  if db.cacheDisabled or db.maxPlans == 0:
+    return
+  if db.planName(q).len > 0:
+    return
+  if db.plans.len >= db.maxPlans:
+    return
+  let name = "ormin_managed_" & $db.nextPlanId
+  let res = pqprepare(db.raw, name.cstring, q.cstring, 0, nil)
+  if res == nil:
+    dbError(db.raw)
+  let status = pqResultStatus(res)
+  if status != PGRES_COMMAND_OK:
+    let detail = $pqResultErrorMessage(res)
+    let message = if detail.len > 0: detail else: $pqErrorMessage(db.raw)
+    pqclear(res)
+    raise newException(DbError, message)
+  pqclear(res)
+  inc db.nextPlanId
+  db.plans.add ManagedPlan(sql: q, name: name)
+
+proc executeManaged(db: var ManagedDbConn; sql: string;
+                    params: cstringArray; count: int32): PPGresult =
+  if db.raw == nil:
+    raise newException(DbError, "Managed PostgreSQL connection is closed")
+  let name = db.planName(sql)
+  if name.len > 0 and not db.cacheDisabled:
+    result = pqexecPrepared(db.raw, name.cstring, count, params, nil, nil, 0)
+  else:
+    result = pqexecParams(db.raw, sql.cstring, count, nil, params, nil, nil, 0)
+  if result == nil:
+    dbError(db.raw)
+  if pqResultStatus(result) in {PGRES_COMMAND_OK, PGRES_TUPLES_OK}:
+    return
+  if name.len > 0 and not db.cacheDisabled:
+    let sqlState = $pqResultErrorField(result, int32(ord('C')))
+    if sqlState in ["26000", "0A000"]:
+      # The server lost this plan or changed its result shape. Never replay an
+      # uncertain operation, and use direct execution for this session now.
+      db.cacheDisabled = true
+      db.plans.setLen(0)
+  let detail = $pqResultErrorMessage(result)
+  let message = if detail.len > 0: detail else: $pqErrorMessage(db.raw)
+  pqclear(result)
+  result = nil
+  raise newException(DbError, message)
+
+template startQuery*(db: ManagedDbConn; s: PStmt) =
+  when declared(pparams):
+    var queryResult {.inject.} = executeManaged(db, s,
+      cast[cstringArray](addr parr), int32(parr.len))
+  else:
+    var queryResult {.inject.} = executeManaged(db, s, nil, 0)
+  # Generated row conversion can raise after a successful execution. Release
+  # that result even when the normal stopQuery path is skipped.
+  defer:
+    if queryResult != nil:
+      pqclear(queryResult)
+  var queryI {.inject.} = cint(-1)
+  var queryLen {.inject.} = pqntuples(queryResult)
+
+template bindParam*(db: ManagedDbConn; s: PStmt; idx: int; x: untyped; t: untyped) =
+  bindParam(db.raw, s, idx, x, t)
+
+template bindNullParam*(db: ManagedDbConn; s: PStmt; idx: int) =
+  bindNullParam(db.raw, s, idx)
+
+template bindParamJson*(db: ManagedDbConn; s: PStmt; idx: int;
+                        x: JsonNode; t: typedesc) =
+  bindParamJson(db.raw, s, idx, x, t)
+
+template bindResult*(db: ManagedDbConn; s: PStmt; idx: int;
+                     dest: untyped; t: typedesc; name: string) =
+  bindResult(db.raw, s, idx, dest, t, name)
+
+template bindResultJson*(db: ManagedDbConn; s: PStmt; idx: int;
+                         obj: JsonNode; t: typedesc; name: string) =
+  bindResultJson(db.raw, s, idx, obj, t, name)
+
+template columnIsNull*(db: ManagedDbConn; s: PStmt; idx: int): bool =
+  columnIsNull(db.raw, s, idx)
+
+template bindToJson*(db: ManagedDbConn; s: PStmt; idx: int;
+                     obj: JsonNode; t: typedesc; name: string) =
+  bindToJson(db.raw, s, idx, obj, t, name)
+
+template stopQuery*(db: ManagedDbConn; s: PStmt) =
+  pqclear(queryResult)
+  queryResult = nil
+
+template stepQuery*(db: ManagedDbConn; s: PStmt; returnsData: bool): bool =
+  stepQuery(db.raw, s, returnsData)
+
+template getLastId*(db: ManagedDbConn; s: PStmt): int =
+  getLastId(db.raw, s)
+
+template getAffectedRows*(db: ManagedDbConn; s: PStmt): int =
+  getAffectedRows(db.raw, s)

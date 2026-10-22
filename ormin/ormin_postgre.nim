@@ -6,7 +6,7 @@ export db_common
 
 type
   DbConn* = PPGconn    ## encapsulates a database connection
-  PStmt = string ## a identifier for the prepared queries
+  PStmt = string ## SQL text passed to the extended query protocol
 
   varcharType* = string
   intType* = int
@@ -31,15 +31,13 @@ proc c_strtod(buf: cstring, endptr: ptr cstring = nil): float64 {.
 proc c_strtol(buf: cstring, endptr: ptr cstring = nil, base: cint = 10): int {.
   importc: "strtol", header: "<stdlib.h>", noSideEffect.}
 
-var sid {.compileTime.}: int
-
 proc prepareStmt*(db: DbConn; q: string): PStmt =
   when defined(debugOrminTrace):
     echo "[[Ormin Executing]]: ", q
-  inc sid
-  result = "ormin" & $sid
-  var res = pqprepare(db, result, q, 0, nil)
-  if pqResultStatus(res) != PGRES_COMMAND_OK: dbError(db)
+  # Ormin used to create a new named server-side statement for every call.
+  # Long-lived connections retained every plan, and the prepare result was
+  # never cleared. Execute parameterized SQL directly instead.
+  result = q
 
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive
@@ -232,16 +230,27 @@ template bindToJson*(db: DbConn; s: PStmt; idx: int; obj: JsonNode;
   let src = pqgetvalue(queryResult, queryI, idx.cint)
   obj[name] = parseJson($src)  
 
+proc checkQueryResult(db: DbConn; res: PPGresult) =
+  if res != nil and pqResultStatus(res) in {PGRES_COMMAND_OK, PGRES_TUPLES_OK}:
+    return
+  # Copy the result's error before releasing it. Failed PQexecParams calls
+  # still return an allocated PGresult that the caller will never stopQuery.
+  let detail =
+    if res == nil: $pqErrorMessage(db)
+    else: $pqResultErrorMessage(res)
+  let message = if detail.len > 0: detail else: $pqErrorMessage(db)
+  if res != nil:
+    pqclear(res)
+  raise newException(DbError, message)
+
 template startQuery*(db: DbConn; s: PStmt) =
   when declared(pparams):
-    var queryResult {.inject.} = pqexecPrepared(db, s, int32(parr.len),
-            cast[cstringArray](addr parr), nil, nil, 0)
+    var queryResult {.inject.} = pqexecParams(db, s.cstring, int32(parr.len),
+            nil, cast[cstringArray](addr parr), nil, nil, 0)
   else:
-    var queryResult {.inject.} = pqexecPrepared(db, s, int32(0),
-            nil, nil, nil, 0)
-  if pqResultStatus(queryResult) == PGRES_COMMAND_OK:
-    discard # insert does not returns data in pg
-  elif pqResultStatus(queryResult) != PGRES_TUPLES_OK: ormin_postgre.dbError(db)
+    var queryResult {.inject.} = pqexecParams(db, s.cstring, int32(0),
+            nil, nil, nil, nil, 0)
+  checkQueryResult(db, queryResult)
   var queryI {.inject.} = cint(-1)
   var queryLen {.inject.} = pqntuples(queryResult)
 

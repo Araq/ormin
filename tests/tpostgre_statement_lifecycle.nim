@@ -4,9 +4,6 @@ import db_connector/db_postgres as pg
 from db_connector/postgres import pqgetvalue
 import ormin/ormin_postgre as orminPostgre
 
-when defined(macosx):
-  {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
-
 let target = getEnv("TEST_DATABASE_URL")
 let db =
   if target.len > 0:

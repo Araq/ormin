@@ -5,9 +5,6 @@ from db_connector/postgres import PPGconn, pqgetvalue, pqnfields
 import ormin
 import ormin/ormin_postgre as orminPostgre
 
-when defined(macosx):
-  {.passL: "-Wl,-rpath,/opt/homebrew/lib/postgresql@14".}
-
 importModel(DbBackend.postgre, "model_postgre")
 
 let target = getEnv("TEST_DATABASE_URL", "postgresql://test@localhost/test_ormin")

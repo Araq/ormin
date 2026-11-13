@@ -18,8 +18,9 @@ task test, "Run all test suite":
   exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
     "tests/tsqlite.nim tests/tdb_utils.nim tests/timportstatic.nim " &
     "tests/ttransactions.nim tests/tpostgres_schema_import.nim " &
-    "tests/tqualified_schema_queries.nim")
+    "tests/tqualified_schema_queries.nim tests/tsqlite_managed_cache.nim")
   exec "atlas-run tests --jobs:2 tests/tquery_types.nim -- -d:release"
+  exec "bash tests/check_managed_copy.sh -d:sqlite"
 
 task setup_postgres, "Ensure local Postgres has test DB/user":
   # Use a simple script to avoid Nim/psql quoting pitfalls

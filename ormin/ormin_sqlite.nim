@@ -11,6 +11,27 @@ export db_common
 type
   DbConn* = PSqlite3  ## encapsulates a database connection
 
+  ManagedPlan = ref object
+    sql: string
+    statement: PStmt
+    inUse: bool
+
+  ManagedSession = ref object
+    raw: DbConn
+    plans: seq[ManagedPlan]
+    maxPlans, activeStatements: int
+
+  ManagedDbConn* = object
+    ## Owns a SQLite connection and a bounded cache of prepared statements.
+    session: ManagedSession
+
+  ManagedStmt* = object
+    ## Owns one use of a statement. Scope exit resets a cached statement or
+    ## finalizes a temporary one, including on exceptions and iterator exits.
+    session: ManagedSession
+    plan: ManagedPlan
+    cached: bool
+
   varcharType* = string
   blobType* = seq[byte]
   intType* = int
@@ -18,6 +39,70 @@ type
   boolType* = bool
   timestampType* = DateTime
   jsonType* = JsonNode
+
+# db_connector does not yet expose sqlite3_close_v2. Match its library selection,
+# including staticSqlite, so outstanding borrowed handles can finish cleanup.
+when defined(staticSqlite):
+  proc closeV2(db: DbConn): cint {.cdecl, importc: "sqlite3_close_v2".}
+else:
+  when defined(windows):
+    when defined(nimOldDlls):
+      const SqliteLibrary = "sqlite3.dll"
+    elif defined(cpu64):
+      const SqliteLibrary = "sqlite3_64.dll"
+    else:
+      const SqliteLibrary = "sqlite3_32.dll"
+  elif defined(macosx):
+    const SqliteLibrary = "libsqlite3(|.0).dylib"
+  else:
+    const SqliteLibrary = "libsqlite3.so(|.0)"
+  proc closeV2(db: DbConn): cint {.
+    cdecl, importc: "sqlite3_close_v2", dynlib: SqliteLibrary.}
+
+proc clearPlans(session: ManagedSession) {.raises: [].} =
+  for plan in session.plans:
+    discard sqlite3.finalize(plan.statement)
+    plan.statement = nil
+  session.plans.setLen(0)
+
+proc closeSession(session: ManagedSession) {.raises: [].} =
+  if session != nil and session.raw != nil:
+    clearPlans(session)
+    discard closeV2(session.raw)
+    session.raw = nil
+
+proc `=destroy`*(db: ManagedDbConn) =
+  closeSession(db.session)
+  `=destroy`(db.session)
+
+proc `=wasMoved`*(db: var ManagedDbConn) =
+  wasMoved(db.session)
+
+proc `=copy`*(dest: var ManagedDbConn; source: ManagedDbConn) {.error.}
+proc `=dup`*(source: ManagedDbConn): ManagedDbConn {.error.}
+
+proc `=destroy`*(s: ManagedStmt) =
+  if s.plan != nil:
+    if s.plan.statement != nil:
+      if s.cached:
+        discard sqlite3.reset(s.plan.statement)
+        discard clear_bindings(s.plan.statement)
+        s.plan.inUse = false
+      else:
+        discard sqlite3.finalize(s.plan.statement)
+        s.plan.statement = nil
+    dec s.session.activeStatements
+  `=destroy`(s.plan)
+  `=destroy`(s.session)
+
+proc `=wasMoved`*(s: var ManagedStmt) =
+  wasMoved(s.plan)
+  wasMoved(s.session)
+
+proc `=copy`*(dest: var ManagedStmt; source: ManagedStmt) {.error.}
+proc `=dup`*(source: ManagedStmt): ManagedStmt {.error.}
+
+const DefaultManagedPlanLimit* = 64
 
 var jsonTimeFormat* = "yyyy-MM-dd HH:mm:ss"
 
@@ -298,3 +383,132 @@ proc open*(connection, user, password, database: string): DbConn =
   ## be established. Only the ``connection`` parameter is used for ``sqlite``.
   if sqlite3.open(connection, result) != SQLITE_OK:
     dbError(result)
+
+proc requireOpen(db: ManagedDbConn): DbConn =
+  if db.session == nil or db.session.raw == nil:
+    raise newException(DbError, "Managed SQLite connection is closed")
+  db.session.raw
+
+proc dbError*(db: ManagedDbConn) {.noreturn.} =
+  dbError(requireOpen(db))
+
+proc openManaged*(connection: string; maxPlans = DefaultManagedPlanLimit): ManagedDbConn =
+  ## Opens an owned SQLite connection. Retain at most `maxPlans` statements;
+  ## zero disables caching. Use the connection from one thread at a time.
+  if maxPlans < 0:
+    raise newException(ValueError, "maxPlans must be nonnegative")
+  result.session = ManagedSession(maxPlans: maxPlans)
+  if sqlite3.open(connection, result.session.raw) != SQLITE_OK:
+    let message = if result.session.raw == nil:
+        "Could not allocate a SQLite connection"
+      else:
+        $sqlite3.errmsg(result.session.raw)
+    closeSession(result.session)
+    raise newException(DbError, message)
+
+proc borrowRaw*(db: ManagedDbConn): DbConn =
+  ## Borrows the SQLite handle. Do not close it or finalize Ormin's statements.
+  ## Finalize any statements you create through this handle yourself.
+  if db.session != nil: db.session.raw else: nil
+
+proc managedPlanCount*(db: ManagedDbConn): int =
+  if db.session != nil: db.session.plans.len else: 0
+
+proc close*(db: var ManagedDbConn) =
+  ## Closes the connection and invalidates outstanding managed statements.
+  ## Repeated close is harmless. Borrowed handles must still be cleaned up.
+  `=destroy`(db)
+  `=wasMoved`(db)
+
+proc reset*(db: var ManagedDbConn) =
+  ## Clears the statement cache without reopening the database, preserving
+  ## in-memory data and transaction state. Rejects active queries or iterators.
+  discard requireOpen(db)
+  if db.session.activeStatements != 0:
+    raise newException(DbError, "Cannot reset SQLite cache while statements are active")
+  clearPlans(db.session)
+
+proc prepareStmt*(db: var ManagedDbConn; q: string): ManagedStmt =
+  ## Acquires an idle cached statement, or prepares a temporary one when the
+  ## cache is full or the same SQL is already in use by an outer query.
+  let raw = requireOpen(db)
+  var cacheable = db.session.plans.len < db.session.maxPlans
+  for plan in db.session.plans:
+    if plan.sql == q:
+      if not plan.inUse:
+        plan.inUse = true
+        inc db.session.activeStatements
+        return ManagedStmt(session: db.session, plan: plan, cached: true)
+      cacheable = false
+      break
+  let plan = ManagedPlan(sql: q, statement: prepareStmt(raw, q), inUse: true)
+  if plan.statement == nil:
+    raise newException(DbError, "SQLite query contains no statement")
+  inc db.session.activeStatements
+  result = ManagedStmt(session: db.session, plan: plan, cached: cacheable)
+  if cacheable:
+    db.session.plans.add plan
+
+proc finalizeStmt*(s: var ManagedStmt) {.raises: [].} =
+  ## Releases this use of the statement early. Scope exit also releases it.
+  `=destroy`(s)
+  `=wasMoved`(s)
+
+proc statementHandle(s: ManagedStmt): PStmt =
+  if s.plan == nil:
+    raise newException(DbError, "Managed SQLite statement is released")
+  if s.session.raw == nil or s.plan.statement == nil:
+    raise newException(DbError, "Managed SQLite connection is closed")
+  s.plan.statement
+
+proc statementHandle(db: ManagedDbConn; s: ManagedStmt): PStmt =
+  discard requireOpen(db)
+  if db.session != s.session:
+    raise newException(DbError, "SQLite statement belongs to another connection")
+  statementHandle(s)
+
+template startBindings*(s: ManagedStmt; n: int) =
+  if clear_bindings(statementHandle(s)) != SQLITE_OK:
+    dbError(s.session.raw)
+
+template bindParam*(db: ManagedDbConn; s: ManagedStmt; idx: int; x, t: untyped) =
+  bindParam(db.session.raw, statementHandle(db, s), idx, x, t)
+
+template bindNullParam*(db: ManagedDbConn; s: ManagedStmt; idx: int) =
+  bindNullParam(db.session.raw, statementHandle(db, s), idx)
+
+template bindParamJson*(db: ManagedDbConn; s: ManagedStmt; idx: int;
+                        x: JsonNode; t: typedesc) =
+  bindParamJson(db.session.raw, statementHandle(db, s), idx, x, t)
+
+template bindResult*(db: ManagedDbConn; s: ManagedStmt; idx: int;
+                     dest: untyped; t: typedesc; name: string) =
+  bindResult(db.session.raw, statementHandle(db, s), idx, dest, t, name)
+
+template bindResultJson*(db: ManagedDbConn; s: ManagedStmt; idx: int;
+                         obj: JsonNode; t: typedesc; name: string) =
+  bindResultJson(db.session.raw, statementHandle(db, s), idx, obj, t, name)
+
+template columnIsNull*(db: ManagedDbConn; s: ManagedStmt; idx: int): bool =
+  columnIsNull(db.session.raw, statementHandle(db, s), idx)
+
+template bindToJson*(db: ManagedDbConn; s: ManagedStmt; idx: int;
+                     obj: JsonNode; t: typedesc; name: string) =
+  bindToJson(db.session.raw, statementHandle(db, s), idx, obj, t, name)
+
+template startQuery*(db: ManagedDbConn; s: ManagedStmt) =
+  discard statementHandle(db, s)
+
+template stopQuery*(db: ManagedDbConn; s: ManagedStmt) =
+  stopQuery(db.session.raw, statementHandle(db, s))
+
+template stepQuery*(db: ManagedDbConn; s: ManagedStmt; returnsData: bool): bool =
+  stepQuery(db.session.raw, statementHandle(db, s), returnsData)
+
+template getLastId*(db: ManagedDbConn; s: ManagedStmt): int =
+  discard statementHandle(db, s)
+  getLastId(db.session.raw, s.plan.statement)
+
+template getAffectedRows*(db: ManagedDbConn; s: ManagedStmt): int =
+  discard statementHandle(db, s)
+  getAffectedRows(db.session.raw, s.plan.statement)

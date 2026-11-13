@@ -59,6 +59,32 @@ importModel(DbBackend.sqlite, "model_sqlite")
 let db {.global.} = open(":memory:", "", "", "")
 ```
 
+For repeated queries, `openManaged` owns the connection and keeps up to 64
+prepared statements by default. Repeated SQL reuses an idle statement. Queries
+beyond the limit, and nested queries whose statement is already in use by an
+outer iterator, use temporary statements that are finalized at query scope exit.
+Set `maxPlans = 0` to disable caching.
+
+```nim
+block:
+  var db = openManaged("app.sqlite", maxPlans = 64)
+  # Use query:/query(T):, createProc, and createIter with this connection.
+  # Under ARC/ORC, scope exit finalizes its cached statements and closes it.
+```
+
+`ManagedDbConn` is move-only; pass it as `var ManagedDbConn` to helpers. Bound
+values are cleared when a query releases its statement, including on exceptions
+or early iterator exits. Explicit `close()` is also supported and invalidates
+outstanding managed statements. Use one owned connection from one thread at a
+time. `borrowRaw` supports other SQLite APIs; never close that handle or finalize
+Ormin's statements, and clean up any statements or handles you create yourself.
+
+For SQLite, `db.reset()` clears the statement cache **without reopening the
+database**, preserving in-memory data and transaction state. It raises `DbError`
+while queries or iterators are active. SQLite's `prepare_v2` handles schema
+changes by recompiling statements when needed; execution errors are still
+reported to the caller. The raw `DbConn` API remains available.
+
 Note: Ormin now properly handles quoted table names in `dropTable`. The compile flag `-d:orminLegacySqliteDropNames` restores that older drop-table behavior by using the normalized lookup name instead of the preserved SQL identifier. The old behavior only worked in SQlite, not Postgres.
 
 ### PostgreSQL

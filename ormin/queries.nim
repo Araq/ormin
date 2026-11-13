@@ -168,7 +168,7 @@ template execNoRowsStrict*(sqlStmt: string) =
   block:
     when defined(debugOrminTrace):
       echo "[[Ormin Executing]]: ", sqlStmt
-    let s {.gensym.} = prepareStmt(db, sqlStmt)
+    var s {.gensym.} = prepareStmt(db, sqlStmt)
     when dbBackend == DbBackend.sqlite:
       defer: finalizeStmt(s)
     startQuery(db, s)
@@ -183,7 +183,7 @@ template execNoRowsLoose(sqlStmt: string) =
   block:
     when defined(debugOrminTrace):
       echo "[[Ormin Executing]]: ", sqlStmt
-    let s {.gensym.} = prepareStmt(db, sqlStmt)
+    var s {.gensym.} = prepareStmt(db, sqlStmt)
     when dbBackend == DbBackend.sqlite:
       defer: finalizeStmt(s)
     startQuery(db, s)
@@ -1611,11 +1611,11 @@ proc queryImpl(q: QueryBuilder; body: NimNode; attempt, produceJson: bool): NimN
   q.retTypeIsJson = produceJson
   applyQueryNode(body, q)
   let sql = queryAsString(q, body)
-  let prepStmt = genSym(nskLet)
+  let prepStmt = genSym(nskVar)
   let res = genSym(nskVar)
   result = newTree(
     nnkStmtList,
-    newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
+    newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   addStatementCleanup(result, prepStmt)
   let rtyp = if q.retType.len > 1 or q.retType.len == 0:
@@ -1748,11 +1748,11 @@ proc queryHookImpl(q: QueryBuilder; body: NimNode; attempt: bool; retType: NimNo
     macros.error "query(T) does not support 'produce json'", body
 
   let sql = queryAsString(q, body)
-  let prepStmt = genSym(nskLet)
+  let prepStmt = genSym(nskVar)
   let res = genSym(nskVar)
   result = newTree(
     nnkStmtList,
-    newLetStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
+    newVarStmt(prepStmt, newCall(bindSym"prepareStmt", ident"db", newLit sql))
   )
   addStatementCleanup(result, prepStmt)
   if q.singleRow:
@@ -1940,8 +1940,11 @@ proc createRoutine(name, query: NimNode; k: NimNodeKind): NimNode =
     result = newStmtList(generateRoutine(name, q, sql, k, raw),
                          generateRoutine(name, q, sql, k, managed))
   elif dbBackend == DbBackend.sqlite:
-    let dbType = newTree(nnkDotExpr, ident"ormin_sqlite", ident"DbConn")
-    result = generateRoutine(name, q, sql, k, dbType)
+    let raw = newTree(nnkDotExpr, ident"ormin_sqlite", ident"DbConn")
+    let managed = newTree(nnkVarTy,
+      newTree(nnkDotExpr, ident"ormin_sqlite", ident"ManagedDbConn"))
+    result = newStmtList(generateRoutine(name, q, sql, k, raw),
+                         generateRoutine(name, q, sql, k, managed))
   else:
     result = generateRoutine(name, q, sql, k, ident("DbConn"))
   when defined(debugOrminDsl):

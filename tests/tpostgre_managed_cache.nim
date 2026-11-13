@@ -248,6 +248,40 @@ suite "owned PostgreSQL plan cache":
       $pid)) == "0"
     pg.close(observer)
 
+  test "transactions commit, roll back and recover through nested savepoints":
+    var db = openManaged(target)
+    pg.exec(db.borrowRaw,
+      sql"create temporary table tb_serial (typserial serial primary key, typinteger integer unique)")
+    transaction:
+      query:
+        insert tb_serial(typinteger = 11)
+    doAssert pg.getValue(db.borrowRaw, sql"select count(*) from tb_serial") == "1"
+    doAssertRaises(DbError):
+      transaction:
+        query:
+          insert tb_serial(typinteger = 22)
+        query:
+          insert tb_serial(typinteger = 11)
+    doAssert pg.getValue(db.borrowRaw, sql"select count(*) from tb_serial") == "1"
+    transaction:
+      query:
+        insert tb_serial(typinteger = 33)
+      var recovered = false
+      transaction:
+        query:
+          insert tb_serial(typinteger = 44)
+        query:
+          insert tb_serial(typinteger = 11)
+      else:
+        recovered = true
+      doAssert recovered
+      query:
+        insert tb_serial(typinteger = 55)
+    let rows = query:
+      select tb_serial(typinteger)
+      orderby typinteger
+    doAssert rows == @[11, 33, 55]
+
   test "reset discards plans and prepares them again on the new session":
     var db = openManaged(target)
     check queryInt(db, "select $1::integer", 2) == "2"

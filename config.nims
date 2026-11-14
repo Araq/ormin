@@ -18,7 +18,8 @@ task test, "Run all test suite":
   exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
     "tests/tsqlite.nim tests/tdb_utils.nim tests/timportstatic.nim " &
     "tests/ttransactions.nim tests/tpostgres_schema_import.nim " &
-    "tests/tqualified_schema_queries.nim")
+    "tests/tqualified_schema_queries.nim tests/tpostgres_expressions.nim " &
+    "tests/tsqlite_postgres_expressions.nim tests/tpostgres_type_syntax.nim")
   exec "atlas-run tests --jobs:2 tests/tquery_types.nim -- -d:release"
 
 task setup_postgres, "Ensure local Postgres has test DB/user":
@@ -35,7 +36,8 @@ task test_postgres, "Run PostgreSQL test suite":
 
   # These suites share one PostgreSQL database and must execute serially.
   exec("atlas-run tests --jobs:1 tests/tfeature.nim tests/tcommon.nim " &
-    "tests/tpostgre.nim tests/tpostgre_statement_lifecycle.nim -- " &
+    "tests/tpostgre.nim tests/tpostgre_statement_lifecycle.nim " &
+    "tests/tpostgres_expressions.nim -- " &
     "-d:nimDebugDlOpen -d:postgre")
   exec("atlas-run tests --jobs:2 tests/tquery_types.nim -- " &
     "-d:nimDebugDlOpen -d:release -d:postgre")

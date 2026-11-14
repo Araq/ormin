@@ -6,6 +6,7 @@ when not declared(attributes):
   {.macros.error: "The query DSL requires a attributes const.".}
 
 import macros, strutils
+from std/options import Option, get
 import db_connector/db_common
 from os import parentDir, `/`
 
@@ -154,6 +155,7 @@ type
     retType: NimNode
     singleRow, retTypeIsJson: bool
     retNames: seq[string]
+    retDbTypes: seq[DbType]
     params: Params
     coln, qmark, aliasGen: int
     colAliases: seq[(string, DbType)]
@@ -367,6 +369,10 @@ proc checkCompatibleSet(a, b: DbType; n: NimNode) =
   discard "too implement; might require a richer type system"
 
 proc toNimType(t: DbTypeKind): NimNode {.compileTime.} =
+  when dbBackend == DbBackend.postgre:
+    if t in {dbUuid, dbArray, dbDecimal, dbDate, dbTime, dbTimeInterval}:
+      # Preserve exact decimal values and PostgreSQL's textual array format.
+      return ident"varcharType"
   let name = ($t).substr(2).toLowerAscii & "Type"
   result = ident(name)
 
@@ -497,6 +503,69 @@ proc renderInlineQuery(n: NimNode; params: var Params;
 proc cond(n: NimNode; q: var string; params: var Params;
           expected: DbType, qb: QueryBuilder): DbType
 
+proc requirePostgres(n: NimNode) {.compileTime.} =
+  when dbBackend != DbBackend.postgre:
+    macros.error "this expression requires the PostgreSQL backend", n
+
+proc postgresCastType(name: string; n: NimNode): DbType {.compileTime.} =
+  let normalized = strutils.splitWhitespace(name).join(" ").toLowerAscii()
+  if normalized.endsWith("[]"):
+    let element = postgresCastType(normalized[0..^3], n)
+    return DbType(kind: dbArray, name: element.name & "[]")
+  let kind =
+    case normalized
+    of "text", "varchar", "character varying", "regclass": dbVarchar
+    of "uuid": dbUuid
+    of "json", "jsonb": dbJson
+    of "bool", "boolean": dbBool
+    of "smallint", "integer", "int", "bigint", "int2", "int4", "int8": dbInt
+    of "real", "double precision", "float4", "float8": dbFloat
+    of "numeric", "decimal": dbDecimal
+    of "date": dbDate
+    of "time", "time with time zone", "time without time zone": dbTime
+    of "timestamp", "timestamptz", "timestamp with time zone",
+        "timestamp without time zone": dbTimestamp
+    of "interval": dbTimeInterval
+    else:
+      macros.error "unsupported PostgreSQL cast type: " & name, n
+      dbUnknown
+  DbType(kind: kind, name: normalized)
+
+proc renderJsonAccess(left, right: NimNode; op: string; q: var string;
+                      params: var Params; qb: QueryBuilder): DbType =
+  requirePostgres(left)
+  q.add '('
+  let source = cond(left, q, params, DbType(kind: dbJson), qb)
+  if source.kind != dbJson:
+    macros.error "JSON extraction requires a json/jsonb expression", left
+  q.add " " & op & " "
+  let path = op in ["#>", "#>>"]
+  let expected = if path: DbType(kind: dbArray, name: "text[]")
+    elif right.kind in {nnkIntLit..nnkInt64Lit}: DbType(kind: dbInt)
+    else: DbType(kind: dbVarchar)
+  let key = cond(right, q, params, expected, qb)
+  if path:
+    if key.kind != dbArray or key.name != "text[]":
+      macros.error "JSON paths require a text[] expression", right
+  elif key.kind notin {dbVarchar, dbInt, dbSerial}:
+    macros.error "JSON extraction requires a text key or integer index", right
+  q.add ')'
+  DbType(kind: (if op in ["->>", "#>>"]: dbVarchar else: dbJson))
+
+proc renderArrayComparison(n: NimNode; q: var string;
+                           params: var Params; qb: QueryBuilder): DbType =
+  requirePostgres(n)
+  expectLen(n, 2)
+  q.add nodeName(n[0]) & "("
+  let arrayType = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
+  if arrayType.kind != dbArray or not arrayType.name.endsWith("[]"):
+    macros.error "ANY/ALL requires a typed array expression", n[1]
+  var elementName = arrayType.name
+  while elementName.endsWith("[]"):
+    elementName.setLen(elementName.len - 2)
+  result = postgresCastType(elementName, n[1])
+  q.add ')'
+
 proc renderWindowClause(n: NimNode; q: var string; params: var Params;
                         qb: QueryBuilder) {.compileTime.} =
   let op = nodeName(n[0]).toLowerAscii()
@@ -549,10 +618,11 @@ proc cond(n: NimNode; q: var string; params: var Params;
   of nnkDotExpr:
     let t = nodeName(n[0])
     let a = nodeName(n[1])
-    escIdent(q, t)
+    var alias: string
+    result = lookup(t, a, qb, alias)
+    escIdent(q, if alias.len > 0 and qb.kind in {qkSelect, qkJoin}: alias else: t)
     q.add '.'
     escIdent(q, a)
-    result = lookup(t, a, qb)
   of nnkPar, nnkStmtListExpr:
     if n.len == 1:
       q.add "("
@@ -601,6 +671,19 @@ proc cond(n: NimNode; q: var string; params: var Params;
   of nnkInfix:
     let op = $n[0]
     case op
+    of "->", "->>":
+      result = renderJsonAccess(n[1], n[2], op, q, params, qb)
+    of "@>", "<@", "&&":
+      requirePostgres(n)
+      q.add '('
+      let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
+      if a.kind notin {dbJson, dbArray} or (op == "&&" and a.kind != dbArray):
+        macros.error "containment requires jsonb or arrays; overlap requires arrays", n
+      q.add " " & op & " "
+      let b = cond(n[2], q, params, a, qb)
+      checkCompatible(a, b, n)
+      q.add ')'
+      result = DbType(kind: dbBool)
     of "and", "or":
       result = DbType(kind: dbBool)
       let a = cond(n[1], q, params, result, qb)
@@ -635,7 +718,11 @@ proc cond(n: NimNode; q: var string; params: var Params;
         q.add ' '
         if env.len == 2:
           qb.env = @[env[1]]
-        let b = cond(n[2], q, params, a, qb)
+        let b =
+          if n[2].kind == nnkCall and nodeName(n[2][0]) in ["any", "all", "some"]:
+            renderArrayComparison(n[2], q, params, qb)
+          else:
+            cond(n[2], q, params, a, qb)
         checkCompatible a, b, n
       result = DbType(kind: dbBool)
     of "in", "notin":
@@ -709,6 +796,39 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
   of nnkCall:
     let op = nodeName(n[0])
+    if op == "sqlCast":
+      requirePostgres(n)
+      expectLen(n, 3)
+      if n[2].kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
+        macros.error "sqlCast requires a literal PostgreSQL type name", n[2]
+      result = postgresCastType(n[2].strVal, n[2])
+      var value = n[1]
+      while value.kind == nnkPar and value.len == 1:
+        value = value[0]
+      q.add '('
+      if value.kind == nnkPrefix and nodeName(value[0]) in ["?", "%"]:
+        q.add placeholder(qb)
+        # PostgreSQL performs the conversion; retain the Nim input's own type.
+        params.add((ex: value[1], typ: ident"auto", isJson: nodeName(value[0]) == "%"))
+      else:
+        discard cond(value, q, params, DbType(kind: dbUnknown), qb)
+      q.add ")::" & result.name
+      return
+    if op in ["jsonPath", "jsonPathText"]:
+      expectLen(n, 3)
+      let sqlOp = if op == "jsonPath": "#>" else: "#>>"
+      return renderJsonAccess(n[1], n[2], sqlOp, q, params, qb)
+    if op in ["isDistinctFrom", "isNotDistinctFrom"]:
+      requirePostgres(n)
+      expectLen(n, 3)
+      q.add '('
+      let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
+      q.add (if op == "isDistinctFrom": " is distinct from " else: " is not distinct from ")
+      let b = cond(n[2], q, params, a, qb)
+      if not isNullLiteral(n[1]) and not isNullLiteral(n[2]):
+        checkCompatible(a, b, n)
+      q.add ')'
+      return DbType(kind: dbBool)
     if isSetOpCall(n):
       let subq = renderInlineQuery(n, params, qb)
       q.add subq.sql
@@ -935,6 +1055,7 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         inc q.coln
         q.retType.add nnkIdentDefs.newTree(newIdentNode(a.name), toNimType(a.typ), newEmptyNode())
         q.retNames.add a.name
+        q.retDbTypes.add a.typ
         doAssert q.env.len > 0
         q.head.add q.env[^1][1]
         q.head.add '.'
@@ -1053,6 +1174,7 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
             cond(col, q.head, q.params, DbType(kind: dbUnknown), q)
         q.retType.add nnkIdentDefs.newTree(newIdentNode(getColumnName(col)), toNimType(t), newEmptyNode())
         q.retNames.add getColumnName(col)
+        q.retDbTypes.add t
       else:
         macros.error "unknown selector: " & repr(n), n
     if q.kind notin {qkUpdate, qkSelect, qkJoin}: q.head.add ")"
@@ -1106,12 +1228,7 @@ proc queryh(n: NimNode; q: QueryBuilder) =
       q.params.add p
     var cols: seq[SourceColumn] = @[]
     for i, name in subq.retNames:
-      let typNode =
-        if i < subq.retType.len and subq.retType[i].kind == nnkIdentDefs and subq.retType[i].len > 1:
-          subq.retType[i][1]
-        else:
-          newEmptyNode()
-      cols.add SourceColumn(name: name, typ: DbType(kind: typeNodeToDbKind(typNode)))
+      cols.add SourceColumn(name: name, typ: subq.retDbTypes[i])
     q.ctes.add CteDef(name: cteName, sql: queryAsString(subq, n[1][1]), cols: cols)
   of "select":
     q.kind = qkSelect
@@ -1458,6 +1575,7 @@ proc buildSetOpQueryParts(op: string; branches: openArray[NimNode];
     if i == 0:
       q.retType = branch.retType
       q.retNames = branch.retNames
+      q.retDbTypes = branch.retDbTypes
       q.retTypeIsJson = branch.retTypeIsJson
     elif branch.retTypeIsJson != q.retTypeIsJson or
         not sameReturnShape(branch.retType, q.retType):
@@ -1547,6 +1665,30 @@ proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
     result = retType
 
 proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode =
+  if typ.kind == nnkIdent and typ.eqIdent("auto"):
+    if isJson:
+      return quote do:
+        block:
+          let value = `ex`
+          if value.kind == JNull:
+            bindNullParam(db, `prepStmt`, `idx`)
+          elif value.kind == JString:
+            bindParam(db, `prepStmt`, `idx`, value.str, string)
+          else:
+            bindParam(db, `prepStmt`, `idx`, value, JsonNode)
+    return quote do:
+      block:
+        let value = `ex`
+        when value is Option:
+          type InputType = typeof(value.get())
+        else:
+          type InputType = typeof(value)
+        var converted: DbValue[InputType]
+        toQueryHook(converted, value)
+        if converted.isNull:
+          bindNullParam(db, `prepStmt`, `idx`)
+        else:
+          bindParam(db, `prepStmt`, `idx`, converted.value, InputType)
   if isJson:
     return newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(idx), ex, typ)
 

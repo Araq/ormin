@@ -16,8 +16,9 @@ proc dbTypFromName*(name: string): DbTypeKind =
   of "varchar", "text", "string": k = dbVarchar
   of "json", "jsonb": k = dbJson
   of "xml": k = dbXml
-  of "decimal": k = dbDecimal
-  of "float", "double", "longdouble", "real": k = dbFloat
+  of "decimal", "numeric": k = dbDecimal
+  of "float", "float4", "float8", "double", "double precision", "longdouble", "real":
+    k = dbFloat
   of "date", "day": k = dbDate
   of "time": k = dbTime
   of "datetime": k = dbDateTime

@@ -183,6 +183,59 @@ Joins use the syntax `join Person(name, city) on author == id` where `Person` is
 
 The join syntax differs from SQL but simplifies selecting fields from multiple tables by making them more explicit while still maintaing SQL's full query capabilities.
 
+### PostgreSQL expressions
+
+Use `sqlCast(value, "type")` when PostgreSQL needs an explicit type. For example,
+`sqlCast(?value, "text")` generates `($1)::text`: the value stays a bound
+parameter, and PostgreSQL performs the conversion. This works with columns,
+expressions, `?` Nim parameters, and `%` JSON parameters.
+
+```nim
+let ids = "{1,3,5}" # PostgreSQL array text
+let required = %*{"enabled": true}
+let rows = query:
+  select records(id, (payload ->> "name") as name)
+  where id == any(sqlCast(?ids, "bigint[]")) and
+    payload @> sqlCast(?required, "jsonb")
+  orderby id
+```
+
+These forms work in inline queries and generated `createProc`/`createIter`
+routines:
+
+| DSL expression | PostgreSQL expression |
+| --- | --- |
+| `sqlCast(?value, "uuid")` | `($1)::uuid` |
+| `id == any(sqlCast(?ids, "bigint[]"))` | `id = ANY(($1)::bigint[])` |
+| `id != all(sqlCast(?ids, "bigint[]"))` | `id <> ALL(($1)::bigint[])` |
+| `payload -> "items"` | JSON extraction with `->` |
+| `payload ->> "name"` | Text extraction with `->>` |
+| `jsonPath(payload, ?path)` | JSON path extraction with `#>` |
+| `jsonPathText(payload, ?path)` | Text path extraction with `#>>` |
+| `payload @> sqlCast(?filter, "jsonb")` | JSONB containment |
+| `tags && sqlCast(?tags, "text[]")` | Array overlap |
+| `isDistinctFrom(note, ?value)` | `note IS DISTINCT FROM $1` |
+| `isNotDistinctFrom(note, ?value)` | `note IS NOT DISTINCT FROM $1` |
+
+`<@` also supports contained-by comparisons for JSONB and arrays; `@>` supports
+array containment. JSON extraction accepts text keys or integer indexes. For a
+bound numeric index, use `sqlCast(?index, "integer")`. Pass JSON paths as text
+arrays, such as `"{settings,enabled}"`. Missing JSON paths can be mapped to
+`Option` fields with `query(T)`.
+
+Cast type names must be supported built-in PostgreSQL types written as string
+literals. Supported types include text/varchar, UUID, JSON/JSONB, booleans,
+integers, real/float4/float8/double precision, numeric/decimal, date/time/timestamp,
+interval, regclass, and their array forms. Arbitrary SQL fragments and runtime
+type names are rejected. Cast parameters use their Nim input types, so an integer
+can be cast to text and a numeric string can be cast to a database number.
+`none(T)` becomes SQL NULL.
+
+Model imports accept `double precision` and array columns such as `text[]` and
+`uuid[]`. PostgreSQL UUID, array, and exact decimal results use Nim strings;
+arrays retain PostgreSQL's array text format and decimals retain their precision.
+These PostgreSQL expression forms are rejected when using the SQLite backend.
+
 ### Return Types
 
 The core return type for queries is a sequence of tuples where the tuples fields are the types of the columns. Some queries with `returning` or `limit` clauses will return singular values or raise a DbError.

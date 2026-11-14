@@ -1,4 +1,4 @@
-import strutils, db_connector/postgres, json, times
+import strutils, db_connector/postgres, json, times, options
 
 import db_connector/db_common
 import query_hooks
@@ -38,6 +38,34 @@ proc prepareStmt*(db: DbConn; q: string): PStmt =
   # Long-lived connections retained every plan, and the prepare result was
   # never cleared. Execute parameterized SQL directly instead.
   result = q
+
+proc appendArrayElement[T](dest: var string; value: T) =
+  when T is Option:
+    if value.isSome:
+      appendArrayElement(dest, value.get())
+    else:
+      dest.add "NULL"
+  elif T is string or T is SomeInteger or T is SomeFloat or T is bool:
+    let text = $value
+    dest.add '"'
+    for c in text:
+      if c == '\0':
+        raise newException(ValueError, "PostgreSQL array elements cannot contain NUL")
+      if c in {'"', '\\'}:
+        dest.add '\\'
+      dest.add c
+    dest.add '"'
+  else:
+    {.error: "PostgreSQL array elements must be strings, numbers, booleans, or Option values".}
+
+proc postgresArrayText*[T](values: openArray[T]): string =
+  ## Encode a one-dimensional Nim array or sequence as a PostgreSQL array parameter.
+  result = "{"
+  for i, value in values:
+    if i > 0:
+      result.add ','
+    appendArrayElement(result, value)
+  result.add '}'
 
 template startBindings*(s: PStmt; n: int) {.dirty.} =
   # pparams is a duplicated array to keep the Nim string alive

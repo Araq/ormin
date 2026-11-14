@@ -70,7 +70,12 @@ proc getType(n: SqlNode; enums: KnownEnums): DbType =
   var it = n
   if it.kind == nkCall:
     it = it[0]
-  if it.kind == nkEnumDef:
+  if it.kind == nkArrayType:
+    let element = getType(it[0], enums)
+    result = DbType(kind: dbArray, name: element.name & "[]")
+  elif it.kind == nkRaw:
+    result = DbType(kind: dbTypFromName(it.strVal), name: it.strVal)
+  elif it.kind == nkEnumDef:
     result.kind = dbEnum
     result.validValues = @[]
     for i in 0 ..< it.len:

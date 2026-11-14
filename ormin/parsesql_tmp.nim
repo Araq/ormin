@@ -530,6 +530,7 @@ type
     nkCreateIndex,
     nkCreateIndexIfNotExists,
     nkEnumDef,
+    nkArrayType,
     nkPragma,
     nkAutoIncrement,
     nkOnDelete,
@@ -807,6 +808,9 @@ proc parseDataType(p: var SqlParser): SqlNode =
       eat(p, tkParRi)
   else:
     result = parseQualifiedIdentifier(p)
+    if sqlIdentName(result).toLowerAscii() == "double" and isKeyw(p, "precision"):
+      result = newNode(nkRaw, "double precision")
+      getTok(p)
     if p.tok.kind == tkParLe:
       var complexType = newNode(nkCall)
       complexType.add(result)
@@ -822,6 +826,15 @@ proc parseDataType(p: var SqlParser): SqlNode =
       eat(p, tkParRi)
       if p.considerTypeParams: 
         result = complexType
+    while p.tok.kind == tkBracketLe:
+      var arrayType = newNode(nkArrayType)
+      arrayType.add(result)
+      getTok(p)
+      if p.tok.kind == tkInteger:
+        arrayType.add(newNode(nkIntegerLit, p.tok.literal))
+        getTok(p)
+      eat(p, tkBracketRi)
+      result = arrayType
 
 proc getPrecedence(p: SqlParser): int =
   if isOpr(p, "*") or isOpr(p, "/") or isOpr(p, "%"):
@@ -1974,6 +1987,12 @@ proc ra(n: SqlNode, s: var SqlWriter) =
   of nkEnumDef:
     s.addKeyw("enum")
     rs(n, s)
+  of nkArrayType:
+    ra(n[0], s)
+    s.add('[')
+    if n.len == 2:
+      s.buffer.add(n[1].strVal)
+    s.add(']')
   of nkPragma:
     s.addKeyw("pragma")
     if n.len >= 1:

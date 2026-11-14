@@ -183,6 +183,111 @@ Joins use the syntax `join Person(name, city) on author == id` where `Person` is
 
 The join syntax differs from SQL but simplifies selecting fields from multiple tables by making them more explicit while still maintaing SQL's full query capabilities.
 
+### Casts
+
+Use a backtick-quoted database type after `as` to cast a value:
+
+```nim
+let value = 42
+let rows = query:
+  select records((?value as `text`) as label)
+```
+
+The cast becomes `($1)::text` on PostgreSQL or `CAST(? AS text)` on SQLite.
+The value remains a bound parameter. Casts also work with columns, expressions,
+`?` Nim parameters, and `%` JSON parameters. Parenthesize casts inside other
+expressions; for example, use ``public_id == (?id as `uuid`)``.
+
+Backticks after `as` are reserved for cast types. Column aliases use unquoted
+identifiers, as in `id as label`; a backtick-quoted alias is rejected. Type names
+are checked at compile time against the supported list, so arbitrary SQL and
+runtime type names cannot be inserted as types.
+
+PostgreSQL supports text/varchar, UUID, JSON/JSONB, booleans, integers,
+real/float4/float8/double precision, numeric/decimal, date/time/timestamp,
+interval, regclass, and their array forms. SQLite supports text/varchar, integer,
+and real types, including their common aliases. SQLite rejects PostgreSQL-only
+cast types. The backends can behave differently for the same cast: for example,
+SQLite converts some invalid numeric text to zero, while PostgreSQL reports an
+error. `none(T)` becomes SQL NULL.
+
+### List membership and JSON extraction
+
+PostgreSQL and SQLite can compare a column against a bound Nim sequence or
+fixed-size array:
+
+```nim
+let ids = @[1, 3, 5]
+let rows = query:
+  select records(id)
+  where id == any(?ids)
+  orderby id
+```
+
+The sequence stays one bound parameter. PostgreSQL receives an array; SQLite
+receives a JSON array and searches it with `json_each`. SQLite supports
+`== any(?ids)`, `== some(?ids)`, and `!= all(?ids)` for bound sequences;
+other quantified comparisons are currently PostgreSQL-only. Both backends
+support empty sequences, `none(seq[T])`, and `Option` elements. On SQLite,
+strings containing NUL, non-finite floating-point values, and unsigned integers
+outside the signed 64-bit range raise `ValueError`.
+
+Both backends support JSON extraction with `->` and `->>`, and the
+`isDistinctFrom` and `isNotDistinctFrom` NULL-safe comparison helpers. SQLite
+JSON operators follow SQLite's path and value rules: for example, extracting
+JSON `true` as text produces `"1"` on SQLite and `"true"` on PostgreSQL.
+SQLite JSON support requires version 3.38 or later with JSON enabled; NULL-safe
+comparisons require SQLite 3.39 or later.
+
+### PostgreSQL expressions
+
+```nim
+let ids = @[1, 3, 5]
+let required = %*{"enabled": true}
+let rows = query:
+  select records(id, (payload ->> "name") as name)
+  where id == any(?ids) and
+    payload @> (?required as `jsonb`)
+  orderby id
+```
+
+These forms work in inline queries and generated `createProc`/`createIter`
+routines:
+
+| DSL expression | PostgreSQL expression |
+| --- | --- |
+| ``(?value as `uuid`)`` | `($1)::uuid` |
+| `id == any(?ids)` | `id = ANY($1)` |
+| `id != all(?ids)` | `id <> ALL($1)` |
+| `payload -> "items"` | JSON extraction with `->` |
+| `payload ->> "name"` | Text extraction with `->>` |
+| `jsonPath(payload, ?path)` | JSON path extraction with `#>` |
+| `jsonPathText(payload, ?path)` | Text path extraction with `#>>` |
+| ``payload @> (?filter as `jsonb`)`` | JSONB containment |
+| ``tags && (?tags as `text[]`)`` | Array overlap |
+| `isDistinctFrom(note, ?value)` | `note IS DISTINCT FROM $1` |
+| `isNotDistinctFrom(note, ?value)` | `note IS NOT DISTINCT FROM $1` |
+
+`<@` also supports contained-by comparisons for JSONB and arrays; `@>` supports
+array containment. JSON extraction accepts text keys or integer indexes. For a
+bound numeric index, use ``(?index as `integer`)``. Pass JSON paths as Nim
+sequences, such as `@["settings", "enabled"]`. Missing JSON paths can be mapped to
+`Option` fields with `query(T)`.
+
+PostgreSQL array parameters accept one-dimensional Nim sequences and fixed arrays
+of strings, numbers, booleans, or `Option` values. Ormin encodes each element and
+sends the array as one bound parameter. Empty sequences become empty arrays;
+`none(seq[T])` becomes SQL NULL. Strings containing NUL raise `ValueError`, since
+PostgreSQL text cannot contain NUL. A PostgreSQL array text string remains accepted
+when already available. Use ``(?ids as `bigint[]`)`` when PostgreSQL needs an
+explicit array type.
+
+Model imports accept `double precision` and array columns such as `text[]` and
+`uuid[]`. PostgreSQL UUID, array, and exact decimal results use Nim strings;
+arrays retain PostgreSQL's array text format and decimals retain their precision.
+JSON path helpers, JSONB containment, and array containment and overlap remain
+PostgreSQL-only.
+
 ### Return Types
 
 The core return type for queries is a sequence of tuples where the tuples fields are the types of the columns. Some queries with `returning` or `limit` clauses will return singular values or raise a DbError.

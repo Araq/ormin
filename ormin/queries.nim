@@ -585,7 +585,14 @@ proc renderCast(n: NimNode; q: var string; params: var Params;
 
 proc renderJsonAccess(left, right: NimNode; op: string; q: var string;
                       params: var Params; qb: QueryBuilder): DbType =
-  requirePostgres(left)
+  when dbBackend == DbBackend.sqlite:
+    if op in ["#>", "#>>"]:
+      macros.error "JSON path helpers require the PostgreSQL backend", left
+  elif dbBackend != DbBackend.postgre:
+    requirePostgres(left)
+  when dbBackend == DbBackend.sqlite:
+    if op == "->>":
+      q.add "cast("
   q.add '('
   let source = cond(left, q, params, DbType(kind: dbJson), qb)
   if source.kind != dbJson:
@@ -602,6 +609,9 @@ proc renderJsonAccess(left, right: NimNode; op: string; q: var string;
   elif key.kind notin {dbVarchar, dbInt, dbSerial}:
     macros.error "JSON extraction requires a text key or integer index", right
   q.add ')'
+  when dbBackend == DbBackend.sqlite:
+    if op == "->>":
+      q.add " as text)"
   DbType(kind: (if op in ["->>", "#>>"]: dbVarchar else: dbJson))
 
 proc renderArrayComparison(n: NimNode; q: var string;
@@ -767,6 +777,24 @@ proc cond(n: NimNode; q: var string; params: var Params;
         if env.len == 2:
           qb.env = @[env[0]]
         let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
+        when dbBackend == DbBackend.sqlite:
+          if n[2].kind == nnkCall and nodeName(n[2][0]) in ["any", "all", "some"]:
+            let quantifier = nodeName(n[2][0])
+            if not ((op == "==" and quantifier in ["any", "some"]) or
+                    (op == "!=" and quantifier == "all")):
+              macros.error "SQLite supports == any/some and != all with bound sequences", n
+            expectLen(n[2], 2)
+            let argument = n[2][1]
+            if argument.kind != nnkPrefix or nodeName(argument[0]) != "?":
+              macros.error "SQLite array comparison requires a bound Nim sequence", argument
+            if env.len == 2:
+              qb.env = @[env[1]]
+            q.add (if op == "==": " in (select value from json_each(" else:
+              " not in (select value from json_each(")
+            q.add placeholder(qb)
+            params.add((ex: argument[1], typ: ident"sqliteArrayParam", isJson: false))
+            q.add "))"
+            return DbType(kind: dbBool)
         q.add ' '
         if op == "==": q.add equals
         elif op == "!=": q.add nequals
@@ -866,7 +894,8 @@ proc cond(n: NimNode; q: var string; params: var Params;
       let sqlOp = if op == "jsonPath": "#>" else: "#>>"
       return renderJsonAccess(n[1], n[2], sqlOp, q, params, qb)
     if op in ["isDistinctFrom", "isNotDistinctFrom"]:
-      requirePostgres(n)
+      when dbBackend notin {DbBackend.postgre, DbBackend.sqlite}:
+        requirePostgres(n)
       expectLen(n, 3)
       q.add '('
       let a = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
@@ -1028,7 +1057,8 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
         finalParams.add newIdentDefs(p.ex, ident"JsonNode")
         body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, true)
       else:
-        let paramType = if p.typ.eqIdent("arrayParam"): ident"auto" else: p.typ
+        let paramType = if p.typ.eqIdent("arrayParam") or p.typ.eqIdent("sqliteArrayParam"):
+          ident"auto" else: p.typ
         finalParams.add newIdentDefs(p.ex, paramType)
         body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, false)
       inc i
@@ -1716,6 +1746,22 @@ proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
     result = retType
 
 proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode =
+  if typ.kind == nnkIdent and typ.eqIdent("sqliteArrayParam"):
+    return quote do:
+      block:
+        let value = `ex`
+        when value is Option:
+          type InputType = typeof(value.get())
+        else:
+          type InputType = typeof(value)
+        when InputType is seq or InputType is array:
+          var converted: DbValue[InputType]
+          toQueryHook(converted, value)
+          # json_each('null') yields one NULL row, preserving NULL-array comparisons.
+          let encoded = if converted.isNull: "null" else: sqliteArrayJson(converted.value)
+          bindParam(db, `prepStmt`, `idx`, encoded, string)
+        else:
+          {.error: "SQLite array comparison requires a Nim sequence or array".}
   if typ.kind == nnkIdent and (typ.eqIdent("auto") or typ.eqIdent("arrayParam")):
     if isJson:
       return quote do:

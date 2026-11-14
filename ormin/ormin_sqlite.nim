@@ -1,7 +1,7 @@
 
 {.deadCodeElim: on.}
 
-import json, times
+import json, times, options, math
 
 import db_connector/db_common
 import db_connector/sqlite3
@@ -20,6 +20,36 @@ type
   jsonType* = JsonNode
 
 var jsonTimeFormat* = "yyyy-MM-dd HH:mm:ss"
+
+proc sqliteArrayElement[T](value: T): JsonNode =
+  when T is Option:
+    if value.isSome: sqliteArrayElement(value.get())
+    else: newJNull()
+  elif T is SomeFloat:
+    if classify(value) in {fcNan, fcInf, fcNegInf}:
+      raise newException(ValueError, "SQLite array parameters require finite numbers")
+    %float(value)
+  elif T is SomeUnsignedInt:
+    if uint64(value) > uint64(high(int64)):
+      raise newException(ValueError, "SQLite array integer is outside the signed 64-bit range")
+    %int64(value)
+  elif T is SomeSignedInt:
+    %int64(value)
+  elif T is string:
+    if '\0' in value:
+      raise newException(ValueError, "SQLite JSON array strings cannot contain NUL")
+    %value
+  elif T is bool:
+    %value
+  else:
+    {.error: "SQLite array elements must be strings, numbers, booleans, or Option values".}
+
+proc sqliteArrayJson*[T](values: openArray[T]): string =
+  ## Encode a one-dimensional Nim array as a JSON parameter for SQLite.
+  var items = newJArray()
+  for value in values:
+    items.add sqliteArrayElement(value)
+  result = $items
 
 proc dbError*(db: DbConn) {.noreturn.} =
   ## raises a DbError exception.

@@ -211,6 +211,34 @@ cast types. The backends can behave differently for the same cast: for example,
 SQLite converts some invalid numeric text to zero, while PostgreSQL reports an
 error. `none(T)` becomes SQL NULL.
 
+### List membership and JSON extraction
+
+PostgreSQL and SQLite can compare a column against a bound Nim sequence or
+fixed-size array:
+
+```nim
+let ids = @[1, 3, 5]
+let rows = query:
+  select records(id)
+  where id == any(?ids)
+  orderby id
+```
+
+The sequence stays one bound parameter. PostgreSQL receives an array; SQLite
+receives a JSON array and searches it with `json_each`. SQLite supports
+`== any(?ids)`, `== some(?ids)`, and `!= all(?ids)` for bound sequences;
+other quantified comparisons are currently PostgreSQL-only. Both backends
+support empty sequences, `none(seq[T])`, and `Option` elements. On SQLite,
+strings containing NUL, non-finite floating-point values, and unsigned integers
+outside the signed 64-bit range raise `ValueError`.
+
+Both backends support JSON extraction with `->` and `->>`, and the
+`isDistinctFrom` and `isNotDistinctFrom` NULL-safe comparison helpers. SQLite
+JSON operators follow SQLite's path and value rules: for example, extracting
+JSON `true` as text produces `"1"` on SQLite and `"true"` on PostgreSQL.
+SQLite JSON support requires version 3.38 or later with JSON enabled; NULL-safe
+comparisons require SQLite 3.39 or later.
+
 ### PostgreSQL expressions
 
 ```nim
@@ -257,7 +285,8 @@ explicit array type.
 Model imports accept `double precision` and array columns such as `text[]` and
 `uuid[]`. PostgreSQL UUID, array, and exact decimal results use Nim strings;
 arrays retain PostgreSQL's array text format and decimals retain their precision.
-The PostgreSQL-specific operators in this section are rejected on SQLite.
+JSON path helpers, JSONB containment, and array containment and overlap remain
+PostgreSQL-only.
 
 ### Return Types
 

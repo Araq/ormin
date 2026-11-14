@@ -378,6 +378,12 @@ proc toNimType(t: DbTypeKind): NimNode {.compileTime.} =
 
 proc toNimType(t: DbType): NimNode {.compileTime.} = toNimType(t.kind)
 
+proc paramNimType(t: DbTypeKind; isJson: bool): NimNode {.compileTime.} =
+  when dbBackend == DbBackend.postgre:
+    if t == dbArray and not isJson:
+      return ident"arrayParam"
+  toNimType(t)
+
 proc escIdent(dest: var string; src: string) =
   if allCharsInSet(src, {'\33'..'\127'}):
     dest.add(src)
@@ -553,10 +559,15 @@ proc renderJsonAccess(left, right: NimNode; op: string; q: var string;
   DbType(kind: (if op in ["->>", "#>>"]: dbVarchar else: dbJson))
 
 proc renderArrayComparison(n: NimNode; q: var string;
-                           params: var Params; qb: QueryBuilder): DbType =
+                           params: var Params; qb: QueryBuilder; element: DbType): DbType =
   requirePostgres(n)
   expectLen(n, 2)
   q.add nodeName(n[0]) & "("
+  if n[1].kind == nnkPrefix and nodeName(n[1][0]) == "?":
+    q.add placeholder(qb)
+    params.add((ex: n[1][1], typ: ident"arrayParam", isJson: false))
+    q.add ')'
+    return element
   let arrayType = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
   if arrayType.kind != dbArray or not arrayType.name.endsWith("[]"):
     macros.error "ANY/ALL requires a typed array expression", n[1]
@@ -720,7 +731,7 @@ proc cond(n: NimNode; q: var string; params: var Params;
           qb.env = @[env[1]]
         let b =
           if n[2].kind == nnkCall and nodeName(n[2][0]) in ["any", "all", "some"]:
-            renderArrayComparison(n[2], q, params, qb)
+            renderArrayComparison(n[2], q, params, qb, a)
           else:
             cond(n[2], q, params, a, qb)
         checkCompatible a, b, n
@@ -775,7 +786,12 @@ proc cond(n: NimNode; q: var string; params: var Params;
       if result.kind == dbUnknown:
         macros.error "cannot infer the type of the placeholder", n
       else:
-        params.add((ex: n[1], typ: toNimType(result), isJson: op == "%"))
+        let paramType =
+          if dbBackend == DbBackend.postgre and result.kind == dbArray and op == "?":
+            ident"arrayParam"
+          else:
+            toNimType(result)
+        params.add((ex: n[1], typ: paramType, isJson: op == "%"))
     of "not":
       result = DbType(kind: dbBool)
       q.add "not "
@@ -809,7 +825,9 @@ proc cond(n: NimNode; q: var string; params: var Params;
       if value.kind == nnkPrefix and nodeName(value[0]) in ["?", "%"]:
         q.add placeholder(qb)
         # PostgreSQL performs the conversion; retain the Nim input's own type.
-        params.add((ex: value[1], typ: ident"auto", isJson: nodeName(value[0]) == "%"))
+        let paramType = if result.kind == dbArray and nodeName(value[0]) == "?":
+          ident"arrayParam" else: ident"auto"
+        params.add((ex: value[1], typ: paramType, isJson: nodeName(value[0]) == "%"))
       else:
         discard cond(value, q, params, DbType(kind: dbUnknown), qb)
       q.add ")::" & result.name
@@ -981,7 +999,8 @@ proc generateRoutine(name: NimNode, q: QueryBuilder;
         finalParams.add newIdentDefs(p.ex, ident"JsonNode")
         body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, true)
       else:
-        finalParams.add newIdentDefs(p.ex, p.typ)
+        let paramType = if p.typ.eqIdent("arrayParam"): ident"auto" else: p.typ
+        finalParams.add newIdentDefs(p.ex, paramType)
         body.add buildHookedParamBinding(prepStmt, i, p.ex, p.typ, false)
       inc i
   body.add newCall(bindSym"startQuery", ident"db", prepStmt)
@@ -1069,7 +1088,8 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         if q.coln > 0: q.head.add ", "
         escIdent(q.head, a.name)
         inc q.coln
-        q.params.add((ex: field(), typ: toNimType(a.typ), isJson: q.retTypeIsJson))
+        q.params.add((ex: field(), typ: paramNimType(a.typ, q.retTypeIsJson),
+          isJson: q.retTypeIsJson))
         if q.values.len > 0: q.values.add ", "
         q.values.add placeholder(q)
   of qkUpdate:
@@ -1080,7 +1100,8 @@ proc selectAll(q: QueryBuilder; tabIndex: int; arg, lineInfo: NimNode) =
         if q.coln > 0: q.head.add ", "
         escIdent(q.head, a.name)
         inc q.coln
-        q.params.add((ex: field(), typ: toNimType(a.typ), isJson: q.retTypeIsJson))
+        q.params.add((ex: field(), typ: paramNimType(a.typ, q.retTypeIsJson),
+          isJson: q.retTypeIsJson))
         q.head.add " = "
         q.head.add placeholder(q)
   else:
@@ -1144,7 +1165,8 @@ proc tableSel(n: NimNode; q: QueryBuilder) =
           if q.coln > 0: q.head.add ", "
           escIdent(q.head, colname)
           inc q.coln
-          q.params.add((ex: col[1], typ: toNimType(coltype), isJson: op == "%"))
+          q.params.add((ex: col[1], typ: paramNimType(coltype.kind, op == "%"),
+            isJson: op == "%"))
         if q.kind == qkUpdate:
           q.head.add " = "
           q.head.add placeholder(q)
@@ -1665,7 +1687,7 @@ proc makeSeq(retType: NimNode; singleRow: bool): NimNode =
     result = retType
 
 proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJson: bool): NimNode =
-  if typ.kind == nnkIdent and typ.eqIdent("auto"):
+  if typ.kind == nnkIdent and (typ.eqIdent("auto") or typ.eqIdent("arrayParam")):
     if isJson:
       return quote do:
         block:
@@ -1676,6 +1698,7 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
             bindParam(db, `prepStmt`, `idx`, value.str, string)
           else:
             bindParam(db, `prepStmt`, `idx`, value, JsonNode)
+    let arrayParam = newLit(typ.eqIdent("arrayParam"))
     return quote do:
       block:
         let value = `ex`
@@ -1688,7 +1711,11 @@ proc buildHookedParamBinding(prepStmt: NimNode; idx: int; ex, typ: NimNode; isJs
         if converted.isNull:
           bindNullParam(db, `prepStmt`, `idx`)
         else:
-          bindParam(db, `prepStmt`, `idx`, converted.value, InputType)
+          when `arrayParam` and (InputType is seq or InputType is array):
+            let encoded = postgresArrayText(converted.value)
+            bindParam(db, `prepStmt`, `idx`, encoded, string)
+          else:
+            bindParam(db, `prepStmt`, `idx`, converted.value, InputType)
   if isJson:
     return newCall(bindSym"bindParamJson", ident"db", prepStmt, newLit(idx), ex, typ)
 

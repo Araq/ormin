@@ -93,6 +93,89 @@ proc checkExpressions(db: DbConn) =
       orderby id
     doAssert byMatrix == @[1, 2, 3]
 
+  block nim_array_parameters:
+    let ids = @[1, 3]
+    let selected = query:
+      select records(id)
+      where id == any(?ids)
+      orderby id
+    doAssert selected == @[1, 3]
+    let fixedIds = [2, 3]
+    let fixed = query:
+      select records(id)
+      where id == any(sqlCast(?fixedIds, "bigint[]"))
+      orderby id
+    doAssert fixed == @[2, 3]
+    let amounts = @[1.25, 3.75]
+    let byAmount = query:
+      select records(id)
+      where amount == any(?amounts)
+      orderby id
+    doAssert byAmount == @[1, 3]
+    let empty: seq[int] = @[]
+    let noMatches = query:
+      select records(id)
+      where id == any(?empty)
+    doAssert noMatches.len == 0
+    let missing = options.none(seq[int])
+    let nullArray = query:
+      select records(id)
+      where id == any(?missing)
+    doAssert nullArray.len == 0
+    let tags = @["red", "green"]
+    let overlapping = query:
+      select records(id)
+      where records.tags && ?tags
+      orderby id
+    doAssert overlapping == @[1, 2]
+    let path = @["nested", "enabled"]
+    let fromPath = query:
+      select records(jsonPathText(payload, ?path) as value)
+      where id == 1
+    doAssert fromPath == @["true"]
+    block:
+      let tags = @["yellow", "violet"]
+      query:
+        update records(?tags)
+        where id == 3
+    let updated = query:
+      select records(id)
+      where id == 3 and "yellow" == any(tags)
+    doAssert updated == @[3]
+    createProc lookupArray:
+      select records(id)
+      where id == any(?values)
+      orderby id
+    doAssert db.lookupArray(@[1, 3]) == @[1, 3]
+
+  block array_strings_are_encoded_as_data:
+    let values = @["", "NULL", "comma,value", "quote\"here", "back\\slash",
+      "{braces}", "'); drop table records; --", " space "]
+    for value in values:
+      let found = query:
+        select records(id)
+        where id == 1 and sqlCast(?value, "text") == any(sqlCast(?values, "text[]"))
+      doAssert found == @[1]
+    let nullable = @[some("NULL"), options.none(string), some("")]
+    let nullText = "NULL"
+    let found = query:
+      select records(id)
+      where id == 1 and sqlCast(?nullText, "text") == any(sqlCast(?nullable, "text[]"))
+    doAssert found == @[1]
+    let nullOnly = @[options.none(string)]
+    let nullArrayText = "{NULL}"
+    let nullMatches = query:
+      select records(id)
+      where id == 1 and isNotDistinctFrom(sqlCast(?nullOnly, "text[]"),
+        sqlCast(?nullArrayText, "text[]"))
+    doAssert nullMatches == @[1]
+    let nul = @["invalid\0value"]
+    doAssertRaises(ValueError):
+      discard query:
+        select records(id)
+        where id == 1 and "invalid" == any(sqlCast(?nul, "text[]"))
+    doAssert pg.getValue(db, sql"select count(*) from records") == "3"
+
   block empty_and_null_arrays:
     let empty = "{}"
     let none = query:

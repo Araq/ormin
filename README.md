@@ -191,11 +191,11 @@ parameter, and PostgreSQL performs the conversion. This works with columns,
 expressions, `?` Nim parameters, and `%` JSON parameters.
 
 ```nim
-let ids = "{1,3,5}" # PostgreSQL array text
+let ids = @[1, 3, 5]
 let required = %*{"enabled": true}
 let rows = query:
   select records(id, (payload ->> "name") as name)
-  where id == any(sqlCast(?ids, "bigint[]")) and
+  where id == any(?ids) and
     payload @> sqlCast(?required, "jsonb")
   orderby id
 ```
@@ -206,8 +206,8 @@ routines:
 | DSL expression | PostgreSQL expression |
 | --- | --- |
 | `sqlCast(?value, "uuid")` | `($1)::uuid` |
-| `id == any(sqlCast(?ids, "bigint[]"))` | `id = ANY(($1)::bigint[])` |
-| `id != all(sqlCast(?ids, "bigint[]"))` | `id <> ALL(($1)::bigint[])` |
+| `id == any(?ids)` | `id = ANY($1)` |
+| `id != all(?ids)` | `id <> ALL($1)` |
 | `payload -> "items"` | JSON extraction with `->` |
 | `payload ->> "name"` | Text extraction with `->>` |
 | `jsonPath(payload, ?path)` | JSON path extraction with `#>` |
@@ -219,9 +219,17 @@ routines:
 
 `<@` also supports contained-by comparisons for JSONB and arrays; `@>` supports
 array containment. JSON extraction accepts text keys or integer indexes. For a
-bound numeric index, use `sqlCast(?index, "integer")`. Pass JSON paths as text
-arrays, such as `"{settings,enabled}"`. Missing JSON paths can be mapped to
+bound numeric index, use `sqlCast(?index, "integer")`. Pass JSON paths as Nim
+sequences, such as `@["settings", "enabled"]`. Missing JSON paths can be mapped to
 `Option` fields with `query(T)`.
+
+PostgreSQL array parameters accept one-dimensional Nim sequences and fixed arrays
+of strings, numbers, booleans, or `Option` values. Ormin encodes each element and
+sends the array as one bound parameter. Empty sequences become empty arrays;
+`none(seq[T])` becomes SQL NULL. Strings containing NUL raise `ValueError`, since
+PostgreSQL text cannot contain NUL. A PostgreSQL array text string remains accepted
+when already available. Use `sqlCast(?ids, "bigint[]")` when PostgreSQL needs an
+explicit array type.
 
 Cast type names must be supported built-in PostgreSQL types written as string
 literals. Supported types include text/varchar, UUID, JSON/JSONB, booleans,

@@ -183,12 +183,35 @@ Joins use the syntax `join Person(name, city) on author == id` where `Person` is
 
 The join syntax differs from SQL but simplifies selecting fields from multiple tables by making them more explicit while still maintaing SQL's full query capabilities.
 
-### PostgreSQL expressions
+### Casts
 
-Use `sqlCast(value, "type")` when PostgreSQL needs an explicit type. For example,
-`sqlCast(?value, "text")` generates `($1)::text`: the value stays a bound
-parameter, and PostgreSQL performs the conversion. This works with columns,
-expressions, `?` Nim parameters, and `%` JSON parameters.
+Use a backtick-quoted database type after `as` to cast a value:
+
+```nim
+let value = 42
+let rows = query:
+  select records((?value as `text`) as label)
+```
+
+The cast becomes `($1)::text` on PostgreSQL or `CAST(? AS text)` on SQLite.
+The value remains a bound parameter. Casts also work with columns, expressions,
+`?` Nim parameters, and `%` JSON parameters. Parenthesize casts inside other
+expressions; for example, use ``public_id == (?id as `uuid`)``.
+
+Backticks after `as` are reserved for cast types. Column aliases use unquoted
+identifiers, as in `id as label`; a backtick-quoted alias is rejected. Type names
+are checked at compile time against the supported list, so arbitrary SQL and
+runtime type names cannot be inserted as types.
+
+PostgreSQL supports text/varchar, UUID, JSON/JSONB, booleans, integers,
+real/float4/float8/double precision, numeric/decimal, date/time/timestamp,
+interval, regclass, and their array forms. SQLite supports text/varchar, integer,
+and real types, including their common aliases. SQLite rejects PostgreSQL-only
+cast types. The backends can behave differently for the same cast: for example,
+SQLite converts some invalid numeric text to zero, while PostgreSQL reports an
+error. `none(T)` becomes SQL NULL.
+
+### PostgreSQL expressions
 
 ```nim
 let ids = @[1, 3, 5]
@@ -196,7 +219,7 @@ let required = %*{"enabled": true}
 let rows = query:
   select records(id, (payload ->> "name") as name)
   where id == any(?ids) and
-    payload @> sqlCast(?required, "jsonb")
+    payload @> (?required as `jsonb`)
   orderby id
 ```
 
@@ -205,21 +228,21 @@ routines:
 
 | DSL expression | PostgreSQL expression |
 | --- | --- |
-| `sqlCast(?value, "uuid")` | `($1)::uuid` |
+| ``(?value as `uuid`)`` | `($1)::uuid` |
 | `id == any(?ids)` | `id = ANY($1)` |
 | `id != all(?ids)` | `id <> ALL($1)` |
 | `payload -> "items"` | JSON extraction with `->` |
 | `payload ->> "name"` | Text extraction with `->>` |
 | `jsonPath(payload, ?path)` | JSON path extraction with `#>` |
 | `jsonPathText(payload, ?path)` | Text path extraction with `#>>` |
-| `payload @> sqlCast(?filter, "jsonb")` | JSONB containment |
-| `tags && sqlCast(?tags, "text[]")` | Array overlap |
+| ``payload @> (?filter as `jsonb`)`` | JSONB containment |
+| ``tags && (?tags as `text[]`)`` | Array overlap |
 | `isDistinctFrom(note, ?value)` | `note IS DISTINCT FROM $1` |
 | `isNotDistinctFrom(note, ?value)` | `note IS NOT DISTINCT FROM $1` |
 
 `<@` also supports contained-by comparisons for JSONB and arrays; `@>` supports
 array containment. JSON extraction accepts text keys or integer indexes. For a
-bound numeric index, use `sqlCast(?index, "integer")`. Pass JSON paths as Nim
+bound numeric index, use ``(?index as `integer`)``. Pass JSON paths as Nim
 sequences, such as `@["settings", "enabled"]`. Missing JSON paths can be mapped to
 `Option` fields with `query(T)`.
 
@@ -228,21 +251,13 @@ of strings, numbers, booleans, or `Option` values. Ormin encodes each element an
 sends the array as one bound parameter. Empty sequences become empty arrays;
 `none(seq[T])` becomes SQL NULL. Strings containing NUL raise `ValueError`, since
 PostgreSQL text cannot contain NUL. A PostgreSQL array text string remains accepted
-when already available. Use `sqlCast(?ids, "bigint[]")` when PostgreSQL needs an
+when already available. Use ``(?ids as `bigint[]`)`` when PostgreSQL needs an
 explicit array type.
-
-Cast type names must be supported built-in PostgreSQL types written as string
-literals. Supported types include text/varchar, UUID, JSON/JSONB, booleans,
-integers, real/float4/float8/double precision, numeric/decimal, date/time/timestamp,
-interval, regclass, and their array forms. Arbitrary SQL fragments and runtime
-type names are rejected. Cast parameters use their Nim input types, so an integer
-can be cast to text and a numeric string can be cast to a database number.
-`none(T)` becomes SQL NULL.
 
 Model imports accept `double precision` and array columns such as `text[]` and
 `uuid[]`. PostgreSQL UUID, array, and exact decimal results use Nim strings;
 arrays retain PostgreSQL's array text format and decimals retain their precision.
-These PostgreSQL expression forms are rejected when using the SQLite backend.
+The PostgreSQL-specific operators in this section are rejected on SQLite.
 
 ### Return Types
 

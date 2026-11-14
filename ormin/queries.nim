@@ -537,6 +537,52 @@ proc postgresCastType(name: string; n: NimNode): DbType {.compileTime.} =
       dbUnknown
   DbType(kind: kind, name: normalized)
 
+proc castType(n: NimNode): DbType {.compileTime.} =
+  var name = ""
+  for part in n:
+    if part.kind notin {nnkIdent, nnkSym}:
+      macros.error "cast type must be a backtick-quoted type name", part
+    let token = part.strVal
+    if name.len > 0 and not token.startsWith("["):
+      name.add ' '
+    name.add token
+  when dbBackend == DbBackend.postgre:
+    result = postgresCastType(name, n)
+  elif dbBackend == DbBackend.sqlite:
+    case strutils.splitWhitespace(name).join(" ").toLowerAscii()
+    of "text", "varchar", "character varying":
+      result = DbType(kind: dbVarchar, name: "text")
+    of "int", "integer", "bigint", "smallint", "int2", "int4", "int8":
+      result = DbType(kind: dbInt, name: "integer")
+    of "real", "float", "float4", "float8", "double", "double precision":
+      result = DbType(kind: dbFloat, name: "real")
+    else:
+      macros.error "unsupported SQLite cast type: " & name, n
+  else:
+    macros.error "casts are not supported for this backend", n
+
+proc renderCast(n: NimNode; q: var string; params: var Params;
+                qb: QueryBuilder): DbType =
+  result = castType(n[2])
+  var value = n[1]
+  while value.kind == nnkPar and value.len == 1:
+    value = value[0]
+  when dbBackend == DbBackend.sqlite:
+    q.add "cast("
+  else:
+    q.add '('
+  if value.kind == nnkPrefix and nodeName(value[0]) in ["?", "%"]:
+    q.add placeholder(qb)
+    let paramType = if result.kind == dbArray and nodeName(value[0]) == "?":
+      ident"arrayParam" else: ident"auto"
+    params.add((ex: value[1], typ: paramType, isJson: nodeName(value[0]) == "%"))
+  else:
+    discard cond(value, q, params, DbType(kind: dbUnknown), qb)
+  when dbBackend == DbBackend.sqlite:
+    q.add " as " & result.name & ")"
+  else:
+    q.add ")::" & result.name
+
 proc renderJsonAccess(left, right: NimNode; op: string; q: var string;
                       params: var Params; qb: QueryBuilder): DbType =
   requirePostgres(left)
@@ -754,14 +800,17 @@ proc cond(n: NimNode; q: var string; params: var Params;
         checkCompatibleSet a, b, n
       result = DbType(kind: dbBool)
     of "as":
-      result = cond(n[1], q, params, expected, qb)
-      q.add " as "
-      expectKind n[2], nnkIdent
-      let alias = $n[2]
-      escIdent(q, alias)
-      qb.colAliases.add((alias, result))
-      if expected.kind != dbUnknown:
-        checkCompatible result, expected, n
+      if n[2].kind == nnkAccQuoted:
+        result = renderCast(n, q, params, qb)
+      else:
+        result = cond(n[1], q, params, expected, qb)
+        q.add " as "
+        expectKind n[2], nnkIdent
+        let alias = $n[2]
+        escIdent(q, alias)
+        qb.colAliases.add((alias, result))
+        if expected.kind != dbUnknown:
+          checkCompatible result, expected, n
     of "&":
       let a = cond(n[1], q, params, DbType(kind: dbVarchar), qb)
       q.add " || "
@@ -812,26 +861,6 @@ proc cond(n: NimNode; q: var string; params: var Params;
       result = cond(n[1], q, params, DbType(kind: dbUnknown), qb)
   of nnkCall:
     let op = nodeName(n[0])
-    if op == "sqlCast":
-      requirePostgres(n)
-      expectLen(n, 3)
-      if n[2].kind notin {nnkStrLit, nnkRStrLit, nnkTripleStrLit}:
-        macros.error "sqlCast requires a literal PostgreSQL type name", n[2]
-      result = postgresCastType(n[2].strVal, n[2])
-      var value = n[1]
-      while value.kind == nnkPar and value.len == 1:
-        value = value[0]
-      q.add '('
-      if value.kind == nnkPrefix and nodeName(value[0]) in ["?", "%"]:
-        q.add placeholder(qb)
-        # PostgreSQL performs the conversion; retain the Nim input's own type.
-        let paramType = if result.kind == dbArray and nodeName(value[0]) == "?":
-          ident"arrayParam" else: ident"auto"
-        params.add((ex: value[1], typ: paramType, isJson: nodeName(value[0]) == "%"))
-      else:
-        discard cond(value, q, params, DbType(kind: dbUnknown), qb)
-      q.add ")::" & result.name
-      return
     if op in ["jsonPath", "jsonPathText"]:
       expectLen(n, 3)
       let sqlOp = if op == "jsonPath": "#>" else: "#>>"

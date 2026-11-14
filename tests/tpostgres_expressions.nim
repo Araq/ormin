@@ -21,30 +21,34 @@ proc checkExpressions(db: DbConn) =
     let numericText = "2.5"
     let enabled = "true"
     let rows = query:
-      select records(sqlCast(?number, "text") as label,
-        sqlCast(?numericText, "double precision") as amount,
-        sqlCast(?enabled, "boolean") as enabled)
+      select records((?number as `text`) as label,
+        (?numericText as `double precision`) as amount,
+        (?enabled as `boolean`) as enabled)
       where id == 1
     doAssert rows == @[("42", 2.5, true)]
     let numeric = "123456789012345678.123456"
     let exact = query:
-      select records(sqlCast(?numeric, "numeric") as value, exact_amount)
+      select records((?numeric as `numeric`) as value, exact_amount)
       where id == 1
     doAssert exact == @[(numeric, numeric)]
 
   block cast_columns_and_uuid_parameters:
     let uuid = "00000000-0000-0000-0000-000000000002"
     let rows = query:
-      select records(sqlCast(id, "text") as label, public_id)
-      where public_id == sqlCast(?uuid, "uuid")
+      select records((id as `text`) as label, public_id)
+      where public_id == (?uuid as `uuid`)
     doAssert rows == @[("2", uuid)]
+    let aliasNamedText = query:
+      select records(id as text)
+      where id == 2
+    doAssert aliasNamedText == @[2]
 
   block null_casts:
     let missing = none(string)
     type Row = object
       value: Option[int]
     let rows = query(Row):
-      select records(sqlCast(?missing, "bigint") as value)
+      select records((?missing as `bigint`) as value)
       where id == 1
     doAssert rows == @[Row(value: none(int))]
 
@@ -53,27 +57,27 @@ proc checkExpressions(db: DbConn) =
     let document = %*{"name": "alpha"}
     let input = %*{"number": "42", "object": {"ok": true}, "missing": nil}
     let rows = query:
-      select records(sqlCast(?text, "jsonb") as first,
-        sqlCast(?document, "jsonb") as second,
-        sqlCast(%input["number"], "bigint") as number,
-        sqlCast(%input["object"], "jsonb") as objectValue)
+      select records((?text as `jsonb`) as first,
+        (?document as `jsonb`) as second,
+        (%input["number"] as `bigint`) as number,
+        (%input["object"] as `jsonb`) as objectValue)
       where id == 1
     doAssert rows == @[(document, document, 42, %*{"ok": true})]
     let absent = query:
       select records(id)
-      where isNotDistinctFrom(note, sqlCast(%input["missing"], "text"))
+      where isNotDistinctFrom(note, (%input["missing"] as `text`))
     doAssert absent == @[1]
 
   block array_membership:
     let ids = "{1,3}"
     let selected = query:
       select records(id)
-      where id == any(sqlCast(?ids, "bigint[]"))
+      where id == any((?ids as `bigint[]`))
       orderby id
     doAssert selected == @[1, 3]
     let excluded = query:
       select records(id)
-      where id != all(sqlCast(?ids, "bigint[]"))
+      where id != all((?ids as `bigint[]`))
       orderby id
     doAssert excluded == @[2]
     let byTag = query:
@@ -84,12 +88,12 @@ proc checkExpressions(db: DbConn) =
     let uuids = "{00000000-0000-0000-0000-000000000001}"
     let byUuid = query:
       select records(id)
-      where public_id == any(sqlCast(?uuids, "uuid[]"))
+      where public_id == any((?uuids as `uuid[]`))
     doAssert byUuid == @[1]
     let multidimensional = "{{1,2},{3,4}}"
     let byMatrix = query:
       select records(id)
-      where id == any(sqlCast(?multidimensional, "bigint[][]"))
+      where id == any((?multidimensional as `bigint[][]`))
       orderby id
     doAssert byMatrix == @[1, 2, 3]
 
@@ -103,7 +107,7 @@ proc checkExpressions(db: DbConn) =
     let fixedIds = [2, 3]
     let fixed = query:
       select records(id)
-      where id == any(sqlCast(?fixedIds, "bigint[]"))
+      where id == any((?fixedIds as `bigint[]`))
       orderby id
     doAssert fixed == @[2, 3]
     let amounts = @[1.25, 3.75]
@@ -154,43 +158,43 @@ proc checkExpressions(db: DbConn) =
     for value in values:
       let found = query:
         select records(id)
-        where id == 1 and sqlCast(?value, "text") == any(sqlCast(?values, "text[]"))
+        where id == 1 and (?value as `text`) == any((?values as `text[]`))
       doAssert found == @[1]
     let nullable = @[some("NULL"), options.none(string), some("")]
     let nullText = "NULL"
     let found = query:
       select records(id)
-      where id == 1 and sqlCast(?nullText, "text") == any(sqlCast(?nullable, "text[]"))
+      where id == 1 and (?nullText as `text`) == any((?nullable as `text[]`))
     doAssert found == @[1]
     let nullOnly = @[options.none(string)]
     let nullArrayText = "{NULL}"
     let nullMatches = query:
       select records(id)
-      where id == 1 and isNotDistinctFrom(sqlCast(?nullOnly, "text[]"),
-        sqlCast(?nullArrayText, "text[]"))
+      where id == 1 and isNotDistinctFrom((?nullOnly as `text[]`),
+        (?nullArrayText as `text[]`))
     doAssert nullMatches == @[1]
     let nul = @["invalid\0value"]
     doAssertRaises(ValueError):
       discard query:
         select records(id)
-        where id == 1 and "invalid" == any(sqlCast(?nul, "text[]"))
+        where id == 1 and "invalid" == any((?nul as `text[]`))
     doAssert pg.getValue(db, sql"select count(*) from records") == "3"
 
   block empty_and_null_arrays:
     let empty = "{}"
     let none = query:
       select records(id)
-      where id == any(sqlCast(?empty, "bigint[]"))
+      where id == any((?empty as `bigint[]`))
     doAssert none.len == 0
     let allRows = query:
       select records(id)
-      where id != all(sqlCast(?empty, "bigint[]"))
+      where id != all((?empty as `bigint[]`))
       orderby id
     doAssert allRows == @[1, 2, 3]
     let missing = options.none(string)
     let nullArray = query:
       select records(id)
-      where id == any(sqlCast(?missing, "bigint[]"))
+      where id == any((?missing as `bigint[]`))
     doAssert nullArray.len == 0
 
   block json_extraction_and_paths:
@@ -198,13 +202,13 @@ proc checkExpressions(db: DbConn) =
     let rows = query:
       select records((payload ->> "name") as name,
         ((payload -> "items") ->> 1) as item,
-        jsonPath(payload, sqlCast(?path, "text[]")) as enabled,
-        sqlCast(jsonPathText(payload, ?path), "boolean") as active)
+        jsonPath(payload, (?path as `text[]`)) as enabled,
+        (jsonPathText(payload, ?path) as `boolean`) as active)
       where id == 1
     doAssert rows == @[("alpha", "20", %true, true)]
     let index = 0
     let first = query:
-      select records(((payload -> "items") ->> sqlCast(?index, "integer")) as item)
+      select records(((payload -> "items") ->> (?index as `integer`)) as item)
       where id == 1
     doAssert first == @["10"]
     type Row = object
@@ -218,20 +222,20 @@ proc checkExpressions(db: DbConn) =
     let document = %*{"nested": {"enabled": true}}
     let matching = query:
       select records(id)
-      where payload @> sqlCast(?document, "jsonb")
+      where payload @> (?document as `jsonb`)
     doAssert matching == @[1]
     let reverse = query:
       select records(id)
-      where sqlCast(?document, "jsonb") <@ payload
+      where (?document as `jsonb`) <@ payload
     doAssert reverse == @[1]
     let tags = "{red}"
     let containsTag = query:
       select records(id)
-      where records.tags @> sqlCast(?tags, "text[]")
+      where records.tags @> (?tags as `text[]`)
     doAssert containsTag == @[1]
     let overlap = query:
       select records(id)
-      where records.tags && sqlCast(?tags, "text[]")
+      where records.tags && (?tags as `text[]`)
     doAssert overlap == @[1]
 
   block null_safe_comparisons:
@@ -253,10 +257,10 @@ proc checkExpressions(db: DbConn) =
   block generated_routines_and_parameter_order:
     createProc lookupId:
       select records(id)
-      where sqlCast(id, "text") == sqlCast(?value, "text") and id >= ?minimum
+      where (id as `text`) == (?value as `text`) and id >= ?minimum
     createIter lookupIds:
       select records(id)
-      where id == any(sqlCast(?values, "bigint[]"))
+      where id == any((?values as `bigint[]`))
       orderby id
     doAssert db.lookupId(2, 1) == @[2]
     doAssert db.lookupId("3", 1) == @[3]
@@ -267,28 +271,28 @@ proc checkExpressions(db: DbConn) =
     let first = "alpha"
     let second = 2
     let found = query:
-      with chosen(select records(id) where (payload ->> "name") == sqlCast(?first, "text"))
+      with chosen(select records(id) where (payload ->> "name") == (?first as `text`))
       select chosen(id)
-      where id < sqlCast(?second, "bigint")
+      where id < (?second as `bigint`)
     doAssert found == @[1]
 
   block ctes_preserve_postgres_column_types:
     let uuid = "00000000-0000-0000-0000-000000000001"
     let selected = query:
-      with chosen(select records(id, public_id, sqlCast(tags, "text[]") as labels))
+      with chosen(select records(id, public_id, (tags as `text[]`) as labels))
       select chosen(id, labels)
-      where "red" == any(labels) and public_id == sqlCast(?uuid, "uuid")
+      where "red" == any(labels) and public_id == (?uuid as `uuid`)
     doAssert selected == @[(1, "{red,blue}")]
     let allColumns = query:
       with chosen(select records(_))
       select chosen(id)
-      where "red" == any(tags) and public_id == sqlCast(?uuid, "uuid")
+      where "red" == any(tags) and public_id == (?uuid as `uuid`)
     doAssert allColumns == @[1]
 
   block cast_values_remain_bound:
     let value = "x'); drop table records; --"
     query:
-      update records(note = sqlCast(?value, "text"))
+      update records(note = (?value as `text`))
       where id == 2
     doAssert pg.getValue(db, sql"select note from records where id = 2") == value
     doAssert pg.getValue(db, sql"select count(*) from records") == "3"
@@ -297,7 +301,7 @@ proc checkExpressions(db: DbConn) =
     let invalid = "not an integer"
     doAssertRaises(DbError):
       discard query:
-        select records(sqlCast(?invalid, "bigint") as value)
+        select records((?invalid as `bigint`) as value)
         where id == 1
     doAssert pg.getValue(db, sql"select count(*) from records") == "3"
 
@@ -305,12 +309,15 @@ static:
   var db: DbConn
   doAssert not compiles(block:
     discard query:
-      select records(sqlCast(id, "text); select 1; --"))
+      select records((id as `not_a_type`) as value)
   )
   doAssert not compiles(block:
-    let dynamicType = "text"
     discard query:
-      select records(sqlCast(id, dynamicType))
+      select records(id as `column_alias`)
+  )
+  doAssert not compiles(block:
+    discard query:
+      select records((id as `text`) as `column_alias`)
   )
   doAssert not compiles(block:
     discard query:
@@ -327,7 +334,7 @@ static:
   )
   doAssert not compiles(block:
     discard query:
-      select records(jsonPathText(payload, sqlCast("{}", "uuid[]")))
+      select records(jsonPathText(payload, ("{}" as `uuid[]`)))
   )
 
 when defined(postgre):
